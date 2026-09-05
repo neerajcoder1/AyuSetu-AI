@@ -54,3 +54,11 @@ A controlled clinical ontology and interview planner determine the required info
              +----------+----------+
                         |
                 Physician Review
+```
+## Team
+
+**Team VX — SIH 2026**
+
+Developed for the Smart India Hackathon 2026 problem statement:
+
+**SIH26047 — Patient Case-Taking Software**
