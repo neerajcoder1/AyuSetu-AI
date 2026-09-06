@@ -36,3 +36,7 @@ Thumbs.db
 # Editor artifacts
 .vscode/settings.json
 *.swp
+.venv-tts-benchmark/
+samples/audio/tts_benchmarks/
+__pycache__/
+*.pyc

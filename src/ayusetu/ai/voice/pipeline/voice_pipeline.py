@@ -4,7 +4,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-from ayusetu.ai.voice.asr.transcriber import transcribe
+def transcribe(audio_path: Path | str):
+    """
+    Lazy wrapper around the real ASR transcribe function.
+
+    Keeps `voice_pipeline.transcribe` patchable by tests.
+    """
+    from ayusetu.ai.voice.asr import transcriber
+    return transcriber.transcribe(audio_path)
+
 from ayusetu.ai.conversation.engine import DialogueEngine, DialogueState
 from ayusetu.ai.voice.tts.chatterbox import ChatterboxTTS
 
@@ -139,8 +147,7 @@ class VoicePipeline:
             state = None  # will be created after ASR if needed
 
         # Import transcribe lazily so that test patches are effective
-        from ayusetu.ai.voice.asr import transcriber
-        asr_output = transcriber.transcribe(audio_path)
+        asr_output = transcribe(audio_path)
         low_conf = asr_output.is_low_confidence()
         result: Dict[str, Any] = {
             "transcribed_text": asr_output.text,
