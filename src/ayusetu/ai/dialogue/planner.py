@@ -1,7 +1,7 @@
 from contracts.dialogue import DialogueState, PlannerAction, ClinicalSlot, DialogueTurn
 from contracts.asr_output import ASROutput
 from contracts.extraction import ExtractionResult
-from neeraj.dialogue.ontology import INTERVIEW_SEQUENCE, SLOT_INTENTS
+from ayusetu.ai.dialogue.ontology import INTERVIEW_SEQUENCE, SLOT_INTENTS
 
 class DialoguePlanner:
     """

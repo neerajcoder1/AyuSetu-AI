@@ -2,9 +2,9 @@ import pytest
 from contracts.asr_output import ASROutput
 from contracts.dialogue import ClinicalSlot
 from contracts.extraction import ExtractionResult, ExtractedSlot
-from neeraj.dialogue.engine import DialogueEngine
-from neeraj.dialogue.extractor import ClinicalExtractor
-from neeraj.dialogue.llm_provider import LLMProvider
+from ayusetu.ai.dialogue.engine import DialogueEngine
+from ayusetu.ai.dialogue.extractor import ClinicalExtractor
+from ayusetu.ai.dialogue.llm_provider import LLMProvider
 
 class E2ETestExtractor(ClinicalExtractor):
     """Specific deterministic extractor mapping strings for the E2E integration test."""

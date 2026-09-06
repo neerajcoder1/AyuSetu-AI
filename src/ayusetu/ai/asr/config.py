@@ -9,7 +9,7 @@ The rest of the codebase reads config.model_id — zero changes needed.
 
 Usage
 -----
-    from neeraj.asr.config import get_config
+    from ayusetu.ai.asr.config import get_config
     config = get_config()
     print(config.model_id)          # shunyalabs/zero-stt-hinglish
     print(config.backend)           # transformers
@@ -35,7 +35,7 @@ from typing import Optional
 from dotenv import load_dotenv
 
 # Load .env from the project root (three levels up from this file:
-# neeraj/asr/config.py → neeraj/asr/ → neeraj/ → project root)
+# ayusetu.ai/asr/config.py → ayusetu.ai/asr/ → ayusetu.ai/ → project root)
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _ENV_FILE = _PROJECT_ROOT / ".env"
 load_dotenv(dotenv_path=_ENV_FILE, override=False)

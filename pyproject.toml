@@ -3,9 +3,9 @@ requires = ["setuptools>=42", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ayusetu-asr"
+name = "ayusetu-ai"
 version = "0.1.0"
-description = "AyuSetu AI — ASR module (Hindi/English/Hinglish)"
+description = "AyuSetu AI — Conversational AI, Dialogue Engine & ASR Pipeline"
 requires-python = ">=3.10"
 dependencies = [
     "transformers==4.44.2",
@@ -16,6 +16,7 @@ dependencies = [
     "numpy<2.0.0,>=1.26.0",
     "pydantic>=2.7.0",
     "python-dotenv>=1.0.1",
+    "openai>=1.0.0",
 ]
 
 [project.optional-dependencies]
@@ -23,10 +24,11 @@ faster-whisper = ["faster-whisper>=1.0.3"]
 dev = ["pytest>=8.0.0", "pytest-cov>=5.0.0"]
 
 [tool.setuptools.packages.find]
-where = ["."]
-include = ["neeraj*", "contracts*"]
+where = ["src", "."]
+include = ["ayusetu*", "contracts*"]
 
 [tool.pytest.ini_options]
+pythonpath = ["src", "."]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]

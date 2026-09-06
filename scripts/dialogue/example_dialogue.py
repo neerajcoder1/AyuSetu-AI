@@ -1,6 +1,6 @@
 from contracts.asr_output import ASROutput
-from neeraj.dialogue.engine import DialogueEngine
-from neeraj.dialogue.llm_provider import OpenAICompatibleProvider
+from ayusetu.ai.dialogue.engine import DialogueEngine
+from ayusetu.ai.dialogue.llm_provider import OpenAICompatibleProvider
 
 # Using the real provider but with a dummy key for a safe trace without hitting an API
 # We can inject a system env variable if we want real calls, but the mock is fine to demonstrate data flow
