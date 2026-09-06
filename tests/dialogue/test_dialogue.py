@@ -1,9 +1,9 @@
 import pytest
 from contracts.asr_output import ASROutput
 from contracts.dialogue import DialogueState, ClinicalSlot
-from neeraj.dialogue.engine import DialogueEngine
-from neeraj.dialogue.extractor import DeterministicPlaceholderExtractor
-from neeraj.dialogue.llm_provider import LLMProvider
+from ayusetu.ai.dialogue.engine import DialogueEngine
+from ayusetu.ai.dialogue.extractor import DeterministicPlaceholderExtractor
+from ayusetu.ai.dialogue.llm_provider import LLMProvider
 
 # 1. Provide a Mock LLM to prove independence from LLM output
 class IndependenceMockLLM(LLMProvider):

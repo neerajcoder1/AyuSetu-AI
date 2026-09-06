@@ -4,7 +4,7 @@ import numpy as np
 import queue
 import sys
 import warnings
-from neeraj.asr.transcriber import transcribe, reset_backend
+from ayusetu.ai.asr.transcriber import transcribe, reset_backend
 
 # Ignore warnings from the audio libraries for a cleaner CLI
 warnings.filterwarnings("ignore")

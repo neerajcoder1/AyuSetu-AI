@@ -6,7 +6,7 @@ This is the ONLY module that external code should import from.
 All other modules (Sai's clinical extraction, conversation engine, etc.)
 interact with the ASR module through a single function:
 
-    from neeraj.asr.transcriber import transcribe
+    from ayusetu.ai.asr.transcriber import transcribe
     output: ASROutput = transcribe("path/to/audio.wav")
 
 Internal modules (model.py, audio_utils.py, confidence.py, config.py)
@@ -24,20 +24,20 @@ from pathlib import Path
 from typing import Optional, Union
 
 from contracts.asr_output import ASROutput
-from neeraj.asr.audio_utils import (
+from ayusetu.ai.asr.audio_utils import (
     AudioLoadError,
     AudioValidationError,
     duration_seconds,
     load_audio,
     validate_audio,
 )
-from neeraj.asr.confidence import (
+from ayusetu.ai.asr.confidence import (
     confidence_from_segments,
     confidence_from_token_scores,
     infer_language_from_text,
 )
-from neeraj.asr.config import ASRConfig, get_config
-from neeraj.asr.model import (
+from ayusetu.ai.asr.config import ASRConfig, get_config
+from ayusetu.ai.asr.model import (
     BaseASRBackend,
     ModelLoadError,
     TranscriptionError,
@@ -119,7 +119,7 @@ def transcribe(
     Args:
         audio_path: Path to the audio file. Must exist and be readable.
         config:     Optional ASRConfig override. If None, reads from environment
-                    variables (see neeraj/asr/config.py and .env.example).
+                    variables (see ayusetu.ai/asr/config.py and .env.example).
 
     Returns:
         ASROutput with fields:
@@ -135,7 +135,7 @@ def transcribe(
 
     Example
     -------
-        >>> from neeraj.asr.transcriber import transcribe
+        >>> from ayusetu.ai.asr.transcriber import transcribe
         >>> output = transcribe("recordings/patient_01.wav")
         >>> print(output.to_dict())
         {"text": "मुझे दो दिन से fever है", "language": "hinglish", "confidence": 0.84}
