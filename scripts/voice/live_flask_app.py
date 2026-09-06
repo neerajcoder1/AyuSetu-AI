@@ -2,7 +2,7 @@ import os
 import subprocess
 from flask import Flask, request, jsonify, render_template_string
 import imageio_ffmpeg
-from ayusetu.ai.asr.transcriber import transcribe, reset_backend
+from ayusetu.ai.voice.asr.transcriber import transcribe, reset_backend
 
 app = Flask(__name__)
 print("Pre-loading ASR Model...")

@@ -1,4 +1,4 @@
-from ayusetu.ai.dialogue.llm_provider import LLMProvider
+from ayusetu.ai.conversation.llm_provider import LLMProvider
 from contracts.dialogue import PlannerAction
 
 class WordingLLM:

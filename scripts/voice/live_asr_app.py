@@ -1,5 +1,5 @@
 import gradio as gr
-from ayusetu.ai.asr.transcriber import transcribe, reset_backend
+from ayusetu.ai.voice.asr.transcriber import transcribe, reset_backend
 import tempfile
 import os
 

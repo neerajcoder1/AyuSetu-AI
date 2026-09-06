@@ -2,10 +2,10 @@ from typing import Optional
 from contracts.asr_output import ASROutput
 from contracts.extraction import ExtractionResult
 from contracts.dialogue import DialogueState, DialogueTurn
-from ayusetu.ai.dialogue.planner import DialoguePlanner
-from ayusetu.ai.dialogue.extractor import ClinicalExtractor, DeterministicPlaceholderExtractor
-from ayusetu.ai.dialogue.wording import WordingLLM
-from ayusetu.ai.dialogue.llm_provider import OpenAICompatibleProvider
+from ayusetu.ai.conversation.planner import DialoguePlanner
+from ayusetu.ai.conversation.extractor import ClinicalExtractor, DeterministicPlaceholderExtractor
+from ayusetu.ai.conversation.wording import WordingLLM
+from ayusetu.ai.conversation.llm_provider import OpenAICompatibleProvider
 
 class DialogueEngine:
     """

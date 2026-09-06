@@ -6,7 +6,7 @@ This is the ONLY module that external code should import from.
 All other modules (Sai's clinical extraction, conversation engine, etc.)
 interact with the ASR module through a single function:
 
-    from ayusetu.ai.asr.transcriber import transcribe
+    from ayusetu.ai.voice.asr.transcriber import transcribe
     output: ASROutput = transcribe("path/to/audio.wav")
 
 Internal modules (model.py, audio_utils.py, confidence.py, config.py)
@@ -24,20 +24,20 @@ from pathlib import Path
 from typing import Optional, Union
 
 from contracts.asr_output import ASROutput
-from ayusetu.ai.asr.audio_utils import (
+from ayusetu.ai.voice.asr.audio_utils import (
     AudioLoadError,
     AudioValidationError,
     duration_seconds,
     load_audio,
     validate_audio,
 )
-from ayusetu.ai.asr.confidence import (
+from ayusetu.ai.voice.asr.confidence import (
     confidence_from_segments,
     confidence_from_token_scores,
     infer_language_from_text,
 )
-from ayusetu.ai.asr.config import ASRConfig, get_config
-from ayusetu.ai.asr.model import (
+from ayusetu.ai.voice.asr.config import ASRConfig, get_config
+from ayusetu.ai.voice.asr.model import (
     BaseASRBackend,
     ModelLoadError,
     TranscriptionError,
@@ -135,7 +135,7 @@ def transcribe(
 
     Example
     -------
-        >>> from ayusetu.ai.asr.transcriber import transcribe
+        >>> from ayusetu.ai.voice.asr.transcriber import transcribe
         >>> output = transcribe("recordings/patient_01.wav")
         >>> print(output.to_dict())
         {"text": "मुझे दो दिन से fever है", "language": "hinglish", "confidence": 0.84}
