@@ -1,0 +1,35 @@
+# AyuSetu AI — ASR Module Dependencies
+# ======================================
+# Install with:
+#   pip install -r requirements.txt
+#
+# For GPU inference (optional):
+#   pip install torch --index-url https://download.pytorch.org/whl/cu118
+
+# ─── Core: HuggingFace Transformers backend ───────────────────────────────────
+transformers==4.44.2
+torch
+huggingface-hub>=0.22.0
+
+# ─── Optional: faster-whisper backend ────────────────────────────────────────
+# Required only if ASR_BACKEND=faster-whisper.
+# Also requires model conversion with ct2-transformers-converter.
+# See README.md for conversion instructions.
+faster-whisper>=1.0.3
+
+# ─── Audio I/O ────────────────────────────────────────────────────────────────
+librosa>=0.10.2
+soundfile>=0.12.1
+numpy<2.0.0,>=1.26.0
+
+# ─── Data contracts ───────────────────────────────────────────────────────────
+pydantic>=2.7.0
+
+# ─── Configuration ────────────────────────────────────────────────────────────
+python-dotenv>=1.0.1
+
+# ─── Testing ──────────────────────────────────────────────────────────────────
+pytest>=8.0.0
+pytest-cov>=5.0.0
+openai
+python-dotenv
