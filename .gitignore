@@ -1,0 +1,38 @@
+# Secrets
+.env
+
+# Model weights — download at runtime; never commit large binary files
+model_weights/
+models/
+*.pt
+*.bin
+*.ot
+*.gguf
+*.safetensors
+
+# Evaluation outputs — generated, not source
+eval/results/
+
+# Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# Patient audio recordings — NEVER commit real patient data
+recordings/
+patient_audio/
+*.patient.wav
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# Editor artifacts
+.vscode/settings.json
+*.swp
