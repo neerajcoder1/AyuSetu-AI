@@ -2,7 +2,7 @@ import pytest
 from contracts.asr_output import ASROutput
 from contracts.dialogue import ClinicalSlot
 from contracts.extraction import ExtractionResult, ExtractedSlot
-from ayusetu.ai.dialogue.planner import DialoguePlanner
+from ayusetu.ai.conversation.planner import DialoguePlanner
 
 @pytest.fixture
 def planner():

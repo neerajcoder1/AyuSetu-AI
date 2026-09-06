@@ -50,7 +50,7 @@ from typing import Optional
 
 import numpy as np
 
-from ayusetu.ai.asr.config import ASRConfig
+from ayusetu.ai.voice.asr.config import ASRConfig
 
 logger = logging.getLogger(__name__)
 

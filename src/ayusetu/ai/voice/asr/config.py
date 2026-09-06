@@ -9,7 +9,7 @@ The rest of the codebase reads config.model_id — zero changes needed.
 
 Usage
 -----
-    from ayusetu.ai.asr.config import get_config
+    from ayusetu.ai.voice.asr.config import get_config
     config = get_config()
     print(config.model_id)          # shunyalabs/zero-stt-hinglish
     print(config.backend)           # transformers

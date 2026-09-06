@@ -46,7 +46,7 @@ import pytest
 import soundfile as sf
 
 from contracts.asr_output import ASROutput
-from ayusetu.ai.asr.audio_utils import (
+from ayusetu.ai.voice.asr.audio_utils import (
     TARGET_SAMPLE_RATE,
     AudioLoadError,
     AudioValidationError,
@@ -54,7 +54,7 @@ from ayusetu.ai.asr.audio_utils import (
     load_audio,
     validate_audio,
 )
-from ayusetu.ai.asr.confidence import (
+from ayusetu.ai.voice.asr.confidence import (
     confidence_from_segments,
     infer_language_from_text,
     logprob_to_confidence,
@@ -390,7 +390,7 @@ class TestConfig:
         monkeypatch.delenv("ASR_MAX_DURATION_SECONDS", raising=False)
         monkeypatch.delenv("HF_TOKEN", raising=False)
 
-        from ayusetu.ai.asr.config import get_config
+        from ayusetu.ai.voice.asr.config import get_config
         config = get_config()
         assert config.model_id == "shunyalabs/zero-stt-hinglish"
         assert config.backend == "transformers"
@@ -403,7 +403,7 @@ class TestConfig:
         monkeypatch.setenv("ASR_BACKEND", "faster-whisper")
         monkeypatch.setenv("ASR_FORCE_LANGUAGE", "hi")
 
-        from ayusetu.ai.asr.config import get_config
+        from ayusetu.ai.voice.asr.config import get_config
         config = get_config()
         assert config.model_id == "openai/whisper-large-v3-turbo"
         assert config.backend == "faster-whisper"
@@ -411,19 +411,19 @@ class TestConfig:
 
     def test_invalid_backend_raises(self, monkeypatch):
         monkeypatch.setenv("ASR_BACKEND", "nemo")
-        from ayusetu.ai.asr.config import get_config
+        from ayusetu.ai.voice.asr.config import get_config
         with pytest.raises(ValueError, match="ASR_BACKEND"):
             get_config()
 
     def test_invalid_device_raises(self, monkeypatch):
         monkeypatch.setenv("ASR_DEVICE", "tpu")
-        from ayusetu.ai.asr.config import get_config
+        from ayusetu.ai.voice.asr.config import get_config
         with pytest.raises(ValueError, match="ASR_DEVICE"):
             get_config()
 
     def test_empty_force_language_treated_as_none(self, monkeypatch):
         monkeypatch.setenv("ASR_FORCE_LANGUAGE", "")
-        from ayusetu.ai.asr.config import get_config
+        from ayusetu.ai.voice.asr.config import get_config
         config = get_config()
         assert config.force_language is None
 
@@ -450,7 +450,7 @@ class TestSmoke:
     @_smoke_skip
     def test_pipeline_does_not_crash_on_synthetic_audio(self, tmp_path):
         """Pipeline must return ASROutput without exception on any audio."""
-        from ayusetu.ai.asr.transcriber import reset_backend, transcribe
+        from ayusetu.ai.voice.asr.transcriber import reset_backend, transcribe
 
         reset_backend()
 
@@ -467,7 +467,7 @@ class TestSmoke:
     @_smoke_skip
     def test_output_matches_contract_schema(self, tmp_path):
         """The output dict must exactly match the agreed AyuSetu contract."""
-        from ayusetu.ai.asr.transcriber import reset_backend, transcribe
+        from ayusetu.ai.voice.asr.transcriber import reset_backend, transcribe
 
         reset_backend()
 
@@ -491,7 +491,7 @@ class TestSmoke:
         Provide a real Hindi speech file via HINDI_AUDIO env var.
         Example: HINDI_AUDIO=samples/hindi_sample.wav
         """
-        from ayusetu.ai.asr.transcriber import reset_backend, transcribe
+        from ayusetu.ai.voice.asr.transcriber import reset_backend, transcribe
 
         audio_path = os.environ.get("HINDI_AUDIO")
         if not audio_path:
@@ -517,7 +517,7 @@ class TestSmoke:
         Provide a real English speech file via ENGLISH_AUDIO env var.
         Example: ENGLISH_AUDIO=samples/english_sample.wav
         """
-        from ayusetu.ai.asr.transcriber import reset_backend, transcribe
+        from ayusetu.ai.voice.asr.transcriber import reset_backend, transcribe
 
         audio_path = os.environ.get("ENGLISH_AUDIO")
         if not audio_path:
@@ -547,7 +547,7 @@ class TestSmoke:
         The recording should contain natural Hindi-English code-switching,
         e.g. "मुझे दो दिन से fever है और बहुत weakness feel हो रही है"
         """
-        from ayusetu.ai.asr.transcriber import reset_backend, transcribe
+        from ayusetu.ai.voice.asr.transcriber import reset_backend, transcribe
 
         audio_path = os.environ.get("HINGLISH_AUDIO")
         if not audio_path:
