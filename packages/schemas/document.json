@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ayusetu.in/schemas/document.json",
+  "title": "Document",
+  "type": "object",
+  "required": ["id", "encounter_id", "page_no", "uri", "doc_type", "quality_score", "ocr_status"],
+  "properties": {
+    "id": { "type": "string", "format": "uuid" },
+    "encounter_id": { "type": "string", "format": "uuid" },
+    "page_no": { "type": "integer" },
+    "uri": { "type": "string" },
+    "doc_type": { "type": "string" },
+    "quality_score": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+    "ocr_status": { "type": "string", "enum": ["pending", "processing", "completed", "failed", "rejected"] },
+    "doc_date": { "type": ["string", "null"], "format": "date" }
+  },
+  "additionalProperties": false
+}

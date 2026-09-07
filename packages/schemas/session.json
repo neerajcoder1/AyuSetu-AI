@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ayusetu.in/schemas/session.json",
+  "title": "SessionState",
+  "type": "object",
+  "required": ["session_id", "encounter_id", "status", "created_at", "ttl_seconds"],
+  "properties": {
+    "session_id": { "type": "string" },
+    "encounter_id": { "type": "string", "format": "uuid" },
+    "patient_id": { "type": ["string", "null"], "format": "uuid" },
+    "channel": { "type": "string", "enum": ["kiosk", "pwa_self", "pwa_companion", "assisted"] },
+    "status": { "type": "string", "enum": ["IDLE", "IDENTIFY", "CONSENT", "INTERVIEW", "SCAN", "REVIEW", "SUBMITTED", "ESCALATED", "ABANDONED"] },
+    "device_fingerprint": { "type": ["string", "null"] },
+    "created_at": { "type": "string", "format": "date-time" },
+    "last_active_at": { "type": "string", "format": "date-time" },
+    "ttl_seconds": { "type": "integer", "default": 1800 }
+  },
+  "additionalProperties": false
+}

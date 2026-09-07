@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ayusetu.in/schemas/red_flag_event.json",
+  "title": "RedFlagEvent",
+  "type": "object",
+  "required": ["id", "encounter_id", "rule_id", "tier", "trigger_text", "detected_at"],
+  "properties": {
+    "id": { "type": "string", "format": "uuid" },
+    "encounter_id": { "type": "string", "format": "uuid" },
+    "rule_id": { "type": "string" },
+    "tier": { "type": "integer", "enum": [1, 2, 3] },
+    "trigger_text": { "type": "string" },
+    "detected_at": { "type": "string", "format": "date-time" },
+    "acknowledged_by": { "type": ["string", "null"], "format": "uuid" },
+    "acknowledged_at": { "type": ["string", "null"], "format": "date-time" },
+    "outcome": { "type": ["string", "null"] }
+  },
+  "additionalProperties": false
+}

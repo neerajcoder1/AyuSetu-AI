@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ayusetu.in/schemas/slot.json",
+  "title": "ClinicalSlot",
+  "type": "object",
+  "required": ["id", "encounter_id", "path", "source", "reported_by", "elicited"],
+  "properties": {
+    "id": { "type": "string", "format": "uuid" },
+    "encounter_id": { "type": "string", "format": "uuid" },
+    "path": { "type": "string", "description": "Ontology path e.g. hpi.severity, allergies.drug" },
+    "value": {},
+    "value_coded": { "type": ["string", "null"] },
+    "confidence": { "type": ["number", "null"], "minimum": 0.0, "maximum": 1.0 },
+    "source": { "type": "string", "enum": ["utterance", "touch", "document", "derived", "clinician"] },
+    "source_ref": { "type": ["string", "null"], "format": "uuid" },
+    "reported_by": { "type": "string", "enum": ["patient", "companion", "attendant", "clinician"] },
+    "elicited": { "type": "boolean", "default": true }
+  },
+  "additionalProperties": false
+}

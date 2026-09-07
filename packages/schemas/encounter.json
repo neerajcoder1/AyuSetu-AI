@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ayusetu.in/schemas/encounter.json",
+  "title": "Encounter",
+  "type": "object",
+  "required": ["id", "patient_id", "department", "visit_type", "intake_depth", "channel", "started_at", "status"],
+  "properties": {
+    "id": { "type": "string", "format": "uuid" },
+    "patient_id": { "type": "string", "format": "uuid" },
+    "department": { "type": "string" },
+    "visit_type": { "type": "string", "enum": ["new", "followup_stable", "followup_new", "walkin"] },
+    "intake_depth": { "type": "string", "enum": ["fast", "interval", "delta", "full"] },
+    "channel": { "type": "string", "enum": ["kiosk", "pwa_self", "pwa_companion", "assisted"] },
+    "reported_by": { "type": ["string", "null"], "enum": ["patient", "companion", "attendant", "clinician", null] },
+    "language": { "type": ["string", "null"] },
+    "started_at": { "type": "string", "format": "date-time" },
+    "submitted_at": { "type": ["string", "null"], "format": "date-time" },
+    "status": { "type": "string", "enum": ["draft", "submitted", "preliminary", "final", "abandoned"] }
+  },
+  "additionalProperties": false
+}

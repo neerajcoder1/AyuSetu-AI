@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ayusetu.in/schemas/summary.json",
+  "title": "ClinicalSummary",
+  "type": "object",
+  "required": ["encounter_id", "status", "model_version", "sections"],
+  "properties": {
+    "encounter_id": { "type": "string", "format": "uuid" },
+    "version": { "type": "integer", "default": 1 },
+    "status": { "type": "string", "enum": ["preliminary", "final"] },
+    "model_version": { "type": "string" },
+    "sections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "clauses"],
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "clauses": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["text"],
+              "properties": {
+                "text": { "type": "string" },
+                "slots": { "type": "array", "items": { "type": "string" } },
+                "source": {
+                  "type": "object",
+                  "properties": {
+                    "type": { "type": "string", "enum": ["utterance", "touch", "document", "derived", "clinician"] },
+                    "ids": { "type": "array", "items": { "type": "string" } }
+                  }
+                },
+                "confidence": { "type": "number" },
+                "elicited": { "type": "boolean" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "alerts": { "type": "array", "items": { "type": "object" } },
+    "coding": { "type": "array", "items": { "type": "object" } },
+    "signed_by": { "type": ["string", "null"], "format": "uuid" },
+    "signed_at": { "type": ["string", "null"], "format": "date-time" }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ayusetu.in/schemas/patient.json",
+  "title": "Patient",
+  "type": "object",
+  "required": ["id", "is_provisional", "created_at"],
+  "properties": {
+    "id": { "type": "string", "format": "uuid", "description": "UUID v7 identifier" },
+    "abha_id": { "type": ["string", "null"], "pattern": "^[0-9]{2}-[0-9]{4}-[0-9]{4}-[0-9]{4}$" },
+    "mrn": { "type": ["string", "null"] },
+    "name_enc": { "type": ["string", "null"], "description": "Base64 encoded AES-256 encrypted name" },
+    "mobile_enc": { "type": ["string", "null"], "description": "Base64 encoded AES-256 encrypted mobile" },
+    "dob": { "type": ["string", "null"], "format": "date" },
+    "sex": { "type": ["string", "null"], "enum": ["male", "female", "other", null] },
+    "district": { "type": ["string", "null"] },
+    "is_provisional": { "type": "boolean", "default": true },
+    "created_at": { "type": "string", "format": "date-time" },
+    "merged_into": { "type": ["string", "null"], "format": "uuid" }
+  },
+  "additionalProperties": false
+}

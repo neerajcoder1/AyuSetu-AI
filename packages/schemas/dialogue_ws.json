@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ayusetu.in/schemas/dialogue_ws.json",
+  "title": "DialogueWebSocketMessage",
+  "type": "object",
+  "required": ["type"],
+  "properties": {
+    "type": {
+      "type": "string",
+      "enum": [
+        "audio_chunk", "touch_answer", "control",
+        "partial_transcript", "final_transcript", "question",
+        "slot_filled", "reask", "state", "error"
+      ]
+    }
+  }
+}

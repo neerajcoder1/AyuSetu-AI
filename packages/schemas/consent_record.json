@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ayusetu.in/schemas/consent_record.json",
+  "title": "ConsentRecord",
+  "type": "object",
+  "required": ["id", "patient_id", "encounter_id", "purposes", "language", "notice_version", "granted_at"],
+  "properties": {
+    "id": { "type": "string", "format": "uuid" },
+    "patient_id": { "type": "string", "format": "uuid" },
+    "encounter_id": { "type": "string", "format": "uuid" },
+    "purposes": {
+      "type": "object",
+      "required": ["clinical", "abdm", "qi", "research"],
+      "properties": {
+        "clinical": { "type": "boolean" },
+        "abdm": { "type": "boolean" },
+        "qi": { "type": "boolean" },
+        "research": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "language": { "type": "string" },
+    "notice_version": { "type": "string" },
+    "granted_at": { "type": "string", "format": "date-time" },
+    "withdrawn_at": { "type": ["string", "null"], "format": "date-time" },
+    "abdm_artefact_id": { "type": ["string", "null"] },
+    "chain_hash": { "type": ["string", "null"], "description": "Base64 or hex encoded SHA-256 hash" }
+  },
+  "additionalProperties": false
+}

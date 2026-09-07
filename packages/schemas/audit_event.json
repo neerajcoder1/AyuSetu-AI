@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ayusetu.in/schemas/audit_event.json",
+  "title": "AuditEvent",
+  "type": "object",
+  "required": [
+    "ts", "actor_id", "actor_role", "action", "resource_type",
+    "resource_id", "outcome", "payload_hash", "prev_hash", "entry_hash"
+  ],
+  "properties": {
+    "seq": { "type": "integer" },
+    "ts": { "type": "string", "format": "date-time" },
+    "actor_id": { "type": "string", "format": "uuid" },
+    "actor_role": { "type": "string" },
+    "action": { "type": "string", "enum": ["READ", "CREATE", "UPDATE", "SIGN", "EXPORT", "BREAKGLASS"] },
+    "resource_type": { "type": "string" },
+    "resource_id": { "type": "string", "format": "uuid" },
+    "patient_id": { "type": ["string", "null"], "format": "uuid" },
+    "encounter_id": { "type": ["string", "null"], "format": "uuid" },
+    "outcome": { "type": "string", "enum": ["ALLOW", "DENY"] },
+    "reason": { "type": ["string", "null"] },
+    "src_device": { "type": ["string", "null"] },
+    "src_ip": { "type": ["string", "null"] },
+    "payload_hash": { "type": "string" },
+    "prev_hash": { "type": "string" },
+    "entry_hash": { "type": "string" }
+  },
+  "additionalProperties": false
+}
