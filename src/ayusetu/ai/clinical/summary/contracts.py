@@ -42,7 +42,18 @@ class CodingCandidate(BaseModel):
 
 
 class SummaryAlert(BaseModel):
-    tier: int
+    """
+    PRD §13.2 Alerts section covers two distinct kinds of content in one
+    list: "Tier 1 and 2 flags with acknowledgement status" (tiered,
+    escalation-linked, from the red-flag engine) AND "abnormal laboratory
+    values; drug and herb–drug interactions" (informational findings from
+    ayusetu.ai.clinical.document_ai.clinical_intelligence, not run through
+    red-flag tiering/escalation at all). `tier` is therefore only set for
+    the former; `category` distinguishes which kind an alert is.
+    """
+
+    tier: Optional[int] = None
+    category: str = "red_flag"
     title: str
     acknowledged: bool = False
 
