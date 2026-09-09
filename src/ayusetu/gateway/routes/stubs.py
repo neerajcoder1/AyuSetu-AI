@@ -1,22 +1,29 @@
 """
 API Gateway v1 REST Endpoints & Routing Stubs
 =============================================
-Authoritative routes per PRD v2.0 §22.5.
-Provides strict schema validation and service routing boundaries.
+Authoritative routes per PRD v2.0 §22.5 with integrated RBAC/ABAC authorization.
 """
 
 from typing import Any, Dict, List, Optional
 import uuid
 import uuid6
 from pydantic import BaseModel, Field
-from fastapi import APIRouter, Header, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
 
 from ayusetu.common.config import settings
 from ayusetu.common.session_cache import SessionCache
 from ayusetu.gateway.errors import ErrorCode, AyuSetuGatewayError
+from ayusetu.gateway.auth.models import Principal, Role, Resource, Action, BreakGlassContext
+from ayusetu.gateway.auth.session_auth import SessionAuthenticator, STAFF_DIRECTORY
+from ayusetu.gateway.auth.dependencies import (
+    get_current_principal,
+    require_roles,
+    require_permission,
+)
 
 router = APIRouter()
 session_cache = SessionCache()
+authenticator = SessionAuthenticator()
 
 
 # --- Request / Response Models ---
@@ -85,6 +92,60 @@ class DeidExportRequest(BaseModel):
     approver_2: str
 
 
+class LoginRequest(BaseModel):
+    username: str
+    password: Optional[str] = None
+
+
+# --- Authentication & Introspection Endpoints ---
+
+@router.post("/auth/token", status_code=status.HTTP_200_OK)
+def login_for_access_token(payload: LoginRequest):
+    """Staff SSO/OIDC login endpoint for role authentication."""
+    staff = STAFF_DIRECTORY.get(payload.username)
+    if not staff:
+        raise AyuSetuGatewayError(
+            ErrorCode.POLICY_DENIED,
+            "Invalid staff username or credentials",
+            401
+        )
+
+    token = f"staff-token-{payload.username}"
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "actor_id": staff["actor_id"],
+        "role": staff["role"].value,
+        "department": staff["department"],
+        "expires_in_minutes": 480  # 8 hour shift
+    }
+
+
+@router.get("/auth/me", status_code=status.HTTP_200_OK)
+def get_current_user_profile(principal: Principal = Depends(get_current_principal)):
+    """Introspect authenticated caller Principal."""
+    return {
+        "actor_id": principal.actor_id,
+        "role": principal.role.value,
+        "department": principal.department,
+        "encounter_id": principal.encounter_id,
+        "is_authenticated": principal.is_authenticated,
+    }
+
+
+@router.post("/auth/logout", status_code=status.HTTP_200_OK)
+def logout(
+    request: Request,
+    principal: Principal = Depends(get_current_principal)
+):
+    """Revoke active session token."""
+    if principal.session_token:
+        authenticator.logout_session(principal.session_token)
+    elif principal.encounter_id:
+        session_cache.panic_clear(principal.encounter_id)
+    return {"status": "logged_out", "actor_id": principal.actor_id}
+
+
 # --- Endpoints per PRD §22.5 ---
 
 @router.post("/sessions", response_model=SessionCreateResponse, status_code=status.HTTP_201_CREATED)
@@ -129,7 +190,8 @@ def identify_patient(id: str, payload: IdentifyRequest):
 def get_mpi_candidates(
     name: Optional[str] = None,
     dob: Optional[str] = None,
-    mobile: Optional[str] = None
+    mobile: Optional[str] = None,
+    principal: Optional[Principal] = None
 ):
     """Fetch candidate patient matches for the review queue."""
     return {"candidates": [], "count": 0}
@@ -214,11 +276,16 @@ def panic_clear_session(id: str):
     }
 
 
-@router.get("/encounters/{id}/summary", status_code=status.HTTP_200_OK)
+@router.get(
+    "/encounters/{id}/summary",
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(require_permission(Resource.SIGNED_CLINICAL_RECORD, Action.READ))]
+)
 def get_encounter_summary(id: str):
     """Fetch physician-facing clinical summary with provenance citations."""
     return {
         "status": "preliminary",
+        "encounter_id": id,
         "model_version": "ayusetu-sum-1.2",
         "sections": [
             {
@@ -245,7 +312,11 @@ def get_encounter_summary(id: str):
     }
 
 
-@router.patch("/encounters/{id}/summary", status_code=status.HTTP_200_OK)
+@router.patch(
+    "/encounters/{id}/summary",
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(require_permission(Resource.SIGNED_CLINICAL_RECORD, Action.UPDATE))]
+)
 def patch_encounter_summary(id: str, payload: SummaryEditRequest):
     """Apply physician edits and record diff in summary_edit."""
     return {
@@ -256,7 +327,11 @@ def patch_encounter_summary(id: str, payload: SummaryEditRequest):
     }
 
 
-@router.post("/encounters/{id}/sign", status_code=status.HTTP_200_OK)
+@router.post(
+    "/encounters/{id}/sign",
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(require_permission(Resource.SIGNED_CLINICAL_RECORD, Action.SIGN))]
+)
 def sign_encounter_summary(id: str, payload: SignEncounterRequest):
     """Sign summary: preliminary -> final."""
     return {
@@ -266,7 +341,11 @@ def sign_encounter_summary(id: str, payload: SignEncounterRequest):
     }
 
 
-@router.get("/encounters/{id}/fhir", status_code=status.HTTP_200_OK)
+@router.get(
+    "/encounters/{id}/fhir",
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(require_roles(Role.PHYSICIAN, Role.MRD))]
+)
 def get_encounter_fhir(id: str):
     """Retrieve FHIR R4 document bundle."""
     return {
@@ -284,13 +363,21 @@ def get_encounter_fhir(id: str):
     }
 
 
-@router.get("/alerts", status_code=status.HTTP_200_OK)
+@router.get(
+    "/alerts",
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(require_roles(Role.ATTENDANT, Role.NURSE, Role.PHYSICIAN, Role.ADMIN, Role.AUDITOR))]
+)
 def get_alerts(tier: int = Query(1, ge=1, le=3), status: str = "open"):
     """Tier 1/2/3 alert queue for the Ops Console."""
     return {"tier": tier, "status": status, "alerts": []}
 
 
-@router.post("/alerts/{id}/acknowledge", status_code=status.HTTP_200_OK)
+@router.post(
+    "/alerts/{id}/acknowledge",
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(require_roles(Role.NURSE, Role.PHYSICIAN))]
+)
 def acknowledge_alert(id: str, payload: AlertAcknowledgeRequest):
     """Acknowledge alert with disposition."""
     return {"alert_id": id, "status": "acknowledged", "disposition": payload.disposition}
@@ -337,7 +424,11 @@ def issue_companion_link(id: str, payload: CompanionLinkRequest):
     }
 
 
-@router.post("/exports", status_code=status.HTTP_202_ACCEPTED)
+@router.post(
+    "/exports",
+    status_code=status.HTTP_202_ACCEPTED,
+    dependencies=[Depends(require_roles(Role.MRD, Role.AUDITOR))]
+)
 def request_deid_export(payload: DeidExportRequest):
     """Request de-identified export with two-person authorization."""
     if payload.approver_1 == payload.approver_2:

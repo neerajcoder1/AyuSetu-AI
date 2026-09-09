@@ -123,11 +123,12 @@ def test_unhandled_exception_safe_handling():
 
 def test_separation_of_duties_export_policy_denied():
     # Same person cannot be both approver 1 and approver 2 per PRD §21.4
-    response = client.post("/api/v1/exports", json={
+    headers = {"Authorization": "Bearer staff-token-mrd-officer"}
+    response = client.post("/api/v1/exports", headers=headers, json={
         "date_from": "2026-01-01",
         "date_to": "2026-09-01",
-        "approver_1": "user-dr-verma",
-        "approver_2": "user-dr-verma"  # Same user!
+        "approver_1": "usr-mrd-001",
+        "approver_2": "usr-mrd-001"  # Same user!
     })
     assert response.status_code == 403
     data = response.json()
