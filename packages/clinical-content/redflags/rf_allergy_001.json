@@ -1,0 +1,20 @@
+{
+  "id": "RF-ALLERGY-001",
+  "tier": 3,
+  "version": 1,
+  "title": "Severe Drug Allergy Precaution",
+  "description": "Documented patient history of severe medication allergy or prior anaphylaxis",
+  "when": {
+    "any": [
+      { "slot": "allergies.severe_drug_allergy", "is_true": true },
+      { "slot": "allergies.anaphylaxis_history", "is_true": true }
+    ]
+  },
+  "action": {
+    "escalate": "inline_flag",
+    "queue_priority": "advisory",
+    "patient_message_key": "none"
+  },
+  "approved_by": "CAB-2026-03",
+  "approved_at": "2026-03-14"
+}

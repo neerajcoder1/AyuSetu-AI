@@ -1,0 +1,30 @@
+{
+  "id": "RF-GI-001",
+  "tier": 2,
+  "version": 1,
+  "title": "Acute Peritoneal / Abdominal Rigidity",
+  "description": "Severe acute abdominal pain presenting with involuntary guarding or abdominal wall rigidity",
+  "when": {
+    "all": [
+      {
+        "any": [
+          { "slot": "symptoms.abdominal_pain", "is_true": true },
+          { "slot": "hpi.abdominal_pain", "is_true": true }
+        ]
+      },
+      {
+        "any": [
+          { "slot": "symptoms.abdominal_rigidity", "is_true": true },
+          { "slot": "hpi.abdominal_rigidity", "is_true": true }
+        ]
+      }
+    ]
+  },
+  "action": {
+    "escalate": "physician_banner",
+    "queue_priority": "urgent",
+    "patient_message_key": "none"
+  },
+  "approved_by": "CAB-2026-03",
+  "approved_at": "2026-03-14"
+}

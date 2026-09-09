@@ -1,0 +1,32 @@
+{
+  "id": "RF-ENDO-001",
+  "tier": 2,
+  "version": 1,
+  "title": "Hyperglycemic Crisis Cluster",
+  "description": "Known diabetes presenting with severe acute vomiting or altered consciousness",
+  "when": {
+    "all": [
+      {
+        "any": [
+          { "slot": "past_history.diabetes", "is_true": true },
+          { "slot": "hpi.diabetes", "is_true": true }
+        ]
+      },
+      {
+        "any": [
+          { "slot": "symptoms.severe_vomiting", "is_true": true },
+          { "slot": "hpi.severe_vomiting", "is_true": true },
+          { "slot": "symptoms.altered_sensorium", "is_true": true },
+          { "slot": "hpi.altered_sensorium", "is_true": true }
+        ]
+      }
+    ]
+  },
+  "action": {
+    "escalate": "physician_banner",
+    "queue_priority": "urgent",
+    "patient_message_key": "none"
+  },
+  "approved_by": "CAB-2026-03",
+  "approved_at": "2026-03-14"
+}

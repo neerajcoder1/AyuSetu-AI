@@ -8,12 +8,13 @@ Non-diagnostic: does not diagnose disease or infer unelicited clinical facts.
 from typing import Any, Dict, List, Tuple
 
 from ayusetu.redflag.models import StructuredClinicalFact
-from ayusetu.redflag.rules import CLINICAL_RULES_REGISTRY, ClinicalRule
+from ayusetu.redflag.rules import ClinicalRule, get_clinical_rules_registry
 
 
 class RedFlagEngine:
     """
     Deterministic rule evaluation engine for clinical safety red flags.
+    Evaluates versioned declarative clinical-content rules.
     """
 
     @classmethod
@@ -40,7 +41,7 @@ class RedFlagEngine:
         facts_map = cls.extract_facts_map(facts)
         matched_rules: List[Tuple[ClinicalRule, str]] = []
 
-        for rule in CLINICAL_RULES_REGISTRY:
+        for rule in get_clinical_rules_registry():
             try:
                 is_matched = rule.predicate(facts_map)
                 if is_matched:

@@ -1,0 +1,30 @@
+{
+  "id": "RF-INF-001",
+  "tier": 2,
+  "version": 1,
+  "title": "Meningism / Severe Infection Warning",
+  "description": "Fever accompanied by acute neck stiffness or signs of meningeal irritation",
+  "when": {
+    "all": [
+      {
+        "any": [
+          { "slot": "symptoms.fever", "is_true": true },
+          { "slot": "hpi.fever", "is_true": true }
+        ]
+      },
+      {
+        "any": [
+          { "slot": "symptoms.neck_stiffness", "is_true": true },
+          { "slot": "hpi.neck_stiffness", "is_true": true }
+        ]
+      }
+    ]
+  },
+  "action": {
+    "escalate": "physician_banner",
+    "queue_priority": "urgent",
+    "patient_message_key": "none"
+  },
+  "approved_by": "CAB-2026-03",
+  "approved_at": "2026-03-14"
+}

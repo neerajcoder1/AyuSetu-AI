@@ -1,0 +1,30 @@
+{
+  "id": "RF-OB-001",
+  "tier": 3,
+  "version": 1,
+  "title": "High-Risk Pregnancy Caution",
+  "description": "Active pregnancy with acute complication indicators requiring obstetric review",
+  "when": {
+    "all": [
+      {
+        "any": [
+          { "slot": "patient.is_pregnant", "is_true": true },
+          { "slot": "hpi.is_pregnant", "is_true": true }
+        ]
+      },
+      {
+        "any": [
+          { "slot": "symptoms.pregnancy_bleeding", "is_true": true },
+          { "slot": "symptoms.severe_headache", "is_true": true }
+        ]
+      }
+    ]
+  },
+  "action": {
+    "escalate": "inline_flag",
+    "queue_priority": "advisory",
+    "patient_message_key": "none"
+  },
+  "approved_by": "CAB-2026-03",
+  "approved_at": "2026-03-14"
+}

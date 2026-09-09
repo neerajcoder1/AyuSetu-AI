@@ -1,0 +1,34 @@
+{
+  "id": "RF-CARD-001",
+  "tier": 1,
+  "version": 1,
+  "title": "Acute Coronary Warning Cluster",
+  "description": "Severe acute chest pain radiating to arm/jaw or associated with diaphoresis/dyspnea",
+  "when": {
+    "all": [
+      {
+        "any": [
+          { "slot": "symptoms.chest_pain", "is_true": true },
+          { "slot": "hpi.chest_pain", "is_true": true }
+        ]
+      },
+      {
+        "any": [
+          { "slot": "symptoms.radiation", "is_true": true },
+          { "slot": "hpi.radiation", "is_true": true },
+          { "slot": "symptoms.diaphoresis", "is_true": true },
+          { "slot": "hpi.diaphoresis", "is_true": true },
+          { "slot": "symptoms.dyspnea", "is_true": true },
+          { "slot": "hpi.dyspnea", "is_true": true }
+        ]
+      }
+    ]
+  },
+  "action": {
+    "escalate": "triage_desk",
+    "queue_priority": "immediate",
+    "patient_message_key": "calm_wait"
+  },
+  "approved_by": "CAB-2026-03",
+  "approved_at": "2026-03-14"
+}

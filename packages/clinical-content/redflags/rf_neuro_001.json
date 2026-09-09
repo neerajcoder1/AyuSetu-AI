@@ -1,0 +1,26 @@
+{
+  "id": "RF-NEURO-001",
+  "tier": 1,
+  "version": 1,
+  "title": "Acute Neurological Deficit / Stroke Signs",
+  "description": "Sudden focal neurological deficit, facial droop, slurred speech, or acute altered sensorium",
+  "when": {
+    "any": [
+      { "slot": "symptoms.focal_deficit", "is_true": true },
+      { "slot": "hpi.focal_deficit", "is_true": true },
+      { "slot": "symptoms.facial_droop", "is_true": true },
+      { "slot": "hpi.facial_droop", "is_true": true },
+      { "slot": "symptoms.speech_slur", "is_true": true },
+      { "slot": "hpi.speech_slur", "is_true": true },
+      { "slot": "symptoms.altered_sensorium", "is_true": true },
+      { "slot": "hpi.altered_sensorium", "is_true": true }
+    ]
+  },
+  "action": {
+    "escalate": "triage_desk",
+    "queue_priority": "immediate",
+    "patient_message_key": "calm_wait"
+  },
+  "approved_by": "CAB-2026-03",
+  "approved_at": "2026-03-14"
+}

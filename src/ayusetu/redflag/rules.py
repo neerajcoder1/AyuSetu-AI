@@ -1,34 +1,57 @@
 """
-Red-Flag Declarative Clinical Rules Catalog
-===========================================
-Deterministic, versioned clinical safety rules per PRD v2.0 §12 & §22.9.
-Evaluates ONLY structured facts. Does NOT accept free-form LLM outputs or
-unelicited assumptions.
+Red-Flag Declarative Clinical Rules Loader & Engine
+===================================================
+Loads, validates, and evaluates versioned clinical-content rules per PRD v2.0 §12, §16.3 & §22.7.
+Treats clinical-content files strictly as DATA (zero eval, zero dynamic execution).
+Fail-closed on invalid schema, missing approval metadata, duplicate IDs, or missing content.
 """
 
-from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional
+import json
+import os
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Set
+
 from ayusetu.redflag.models import RedFlagTier
 
 
 @dataclass(frozen=True)
+class RuleAction:
+    """Action specification executed when a rule matches."""
+    escalate: str
+    queue_priority: str
+    patient_message_key: str = "calm_wait"
+
+
+@dataclass(frozen=True)
 class ClinicalRule:
-    """Declarative definition of a clinical red-flag rule."""
+    """Declarative, versioned clinical safety rule loaded from clinical-content."""
     rule_id: str
-    title: str
-    description: str  # Deterministic non-PHI template
     tier: RedFlagTier
+    version: int
+    title: str
+    description: str
+    action: RuleAction
+    approved_by: str
+    approved_at: str
     required_paths: List[str]
     predicate: Callable[[Dict[str, Any]], bool]
+    raw_spec: Dict[str, Any] = field(default_factory=dict, repr=False)
 
 
-def get_fact_value(facts: Dict[str, Any], path: str) -> Optional[Any]:
-    """Retrieve structured fact value, returning None if missing or unelicited."""
-    return facts.get(path)
+# ==============================================================================
+# Declarative Predicate Evaluator (Safe Data-Driven Execution)
+# ==============================================================================
+
+VALID_OPERATORS = {
+    "all", "any", "slot", "in", "contains",
+    "is_true", "equals", "eq", "value",
+    "min", "max", "lt", "gt", "gte", "lte"
+}
 
 
-def is_truthy(val: Any) -> bool:
-    """Explicit truthiness helper: returns True ONLY if value is explicitly True or 'true'."""
+def _is_truthy(val: Any) -> bool:
+    """Explicit truthiness helper: returns True ONLY if value is explicitly True or positive text."""
     if val is True:
         return True
     if isinstance(val, str) and val.strip().lower() in ("true", "yes", "positive", "present"):
@@ -36,226 +59,318 @@ def is_truthy(val: Any) -> bool:
     return False
 
 
-# ==============================================================================
-# Rule Predicates (Deterministic & Non-Diagnostic)
-# ==============================================================================
+def _safe_float(val: Any) -> Optional[float]:
+    """Safely convert a value to float for numerical comparisons, returning None on failure."""
+    if val is None or isinstance(val, bool):
+        return None
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return None
 
-def _match_rf_card_001(facts: Dict[str, Any]) -> bool:
-    """RF-CARD-001: Acute chest pain with radiation to arm/jaw or associated diaphoresis/dyspnea."""
-    has_chest_pain = is_truthy(get_fact_value(facts, "symptoms.chest_pain")) or is_truthy(get_fact_value(facts, "hpi.chest_pain"))
-    if not has_chest_pain:
+
+def _evaluate_leaf_predicate(clause: Dict[str, Any], facts: Dict[str, Any]) -> bool:
+    """Evaluate a single leaf predicate against structured facts."""
+    slot_path = clause.get("slot")
+    if not slot_path or not isinstance(slot_path, str):
+        raise ValueError(f"Leaf predicate missing valid 'slot' path: {clause}")
+
+    fact_val = facts.get(slot_path)
+
+    # 1. is_true operator
+    if "is_true" in clause:
+        expected = clause["is_true"]
+        if expected is True:
+            return _is_truthy(fact_val)
+        return not _is_truthy(fact_val)
+
+    # 2. in operator
+    if "in" in clause:
+        allowed = clause["in"]
+        if not isinstance(allowed, (list, tuple, set)):
+            raise ValueError(f"'in' operator requires a list: {clause}")
+        if fact_val is None:
+            return False
+        return fact_val in allowed or str(fact_val).lower() in [str(a).lower() for a in allowed]
+
+    # 3. contains operator
+    if "contains" in clause:
+        needle = clause["contains"]
+        if fact_val is None:
+            return False
+        if isinstance(fact_val, (list, tuple, set)):
+            return needle in fact_val or any(str(needle).lower() == str(item).lower() for item in fact_val)
+        return str(needle).lower() in str(fact_val).lower()
+
+    # 4. equals / eq / value operator
+    for eq_key in ("equals", "eq", "value"):
+        if eq_key in clause:
+            target = clause[eq_key]
+            if fact_val is None:
+                return False
+            return str(fact_val).strip().lower() == str(target).strip().lower()
+
+    # 5. Numerical comparisons (min / max / lt / gt / gte / lte)
+    numeric_val = _safe_float(fact_val)
+    if numeric_val is None:
+        # If the fact is missing or non-numeric, numerical predicates evaluate to False
         return False
-    
-    has_radiation = is_truthy(get_fact_value(facts, "symptoms.radiation")) or is_truthy(get_fact_value(facts, "hpi.radiation"))
-    has_diaphoresis = is_truthy(get_fact_value(facts, "symptoms.diaphoresis")) or is_truthy(get_fact_value(facts, "hpi.diaphoresis"))
-    has_dyspnea = is_truthy(get_fact_value(facts, "symptoms.dyspnea")) or is_truthy(get_fact_value(facts, "hpi.dyspnea"))
 
-    return has_radiation or has_diaphoresis or has_dyspnea
+    if "lt" in clause:
+        threshold = _safe_float(clause["lt"])
+        if threshold is None or not (numeric_val < threshold):
+            return False
 
+    if "gt" in clause:
+        threshold = _safe_float(clause["gt"])
+        if threshold is None or not (numeric_val > threshold):
+            return False
 
-def _match_rf_resp_001(facts: Dict[str, Any]) -> bool:
-    """RF-RESP-001: Severe acute respiratory distress, stridor, or documented SpO2 < 90%."""
-    has_stridor = is_truthy(get_fact_value(facts, "symptoms.stridor")) or is_truthy(get_fact_value(facts, "hpi.stridor"))
-    has_severe_dyspnea = is_truthy(get_fact_value(facts, "symptoms.dyspnea_severe")) or is_truthy(get_fact_value(facts, "hpi.dyspnea_severe"))
-    
-    spo2 = get_fact_value(facts, "vitals.spo2")
-    has_hypoxia = False
-    if spo2 is not None:
-        try:
-            has_hypoxia = float(spo2) < 90.0
-        except (ValueError, TypeError):
-            pass
+    if "min" in clause or "gte" in clause:
+        raw_t = clause.get("min", clause.get("gte"))
+        threshold = _safe_float(raw_t)
+        if threshold is None or not (numeric_val >= threshold):
+            return False
 
-    return has_stridor or has_severe_dyspnea or has_hypoxia
+    if "max" in clause or "lte" in clause:
+        raw_t = clause.get("max", clause.get("lte"))
+        threshold = _safe_float(raw_t)
+        if threshold is None or not (numeric_val <= threshold):
+            return False
 
-
-def _match_rf_neuro_001(facts: Dict[str, Any]) -> bool:
-    """RF-NEURO-001: Acute focal neurological deficit, FAST stroke signs, or sudden altered sensorium."""
-    has_focal_deficit = is_truthy(get_fact_value(facts, "symptoms.focal_deficit")) or is_truthy(get_fact_value(facts, "hpi.focal_deficit"))
-    has_altered_sensorium = is_truthy(get_fact_value(facts, "symptoms.altered_sensorium")) or is_truthy(get_fact_value(facts, "hpi.altered_sensorium"))
-    has_facial_droop = is_truthy(get_fact_value(facts, "symptoms.facial_droop")) or is_truthy(get_fact_value(facts, "hpi.facial_droop"))
-    has_speech_slur = is_truthy(get_fact_value(facts, "symptoms.speech_slur")) or is_truthy(get_fact_value(facts, "hpi.speech_slur"))
-
-    return has_focal_deficit or has_altered_sensorium or has_facial_droop or has_speech_slur
+    return True
 
 
-def _match_rf_imm_001(facts: Dict[str, Any]) -> bool:
-    """RF-IMM-001: Acute anaphylaxis signs with laryngeal/facial edema or airway compromise."""
-    has_anaphylaxis = is_truthy(get_fact_value(facts, "allergies.acute_anaphylaxis")) or is_truthy(get_fact_value(facts, "hpi.acute_anaphylaxis"))
-    has_laryngeal_edema = is_truthy(get_fact_value(facts, "symptoms.laryngeal_edema")) or is_truthy(get_fact_value(facts, "hpi.laryngeal_edema"))
+def _evaluate_expression(when_spec: Dict[str, Any], facts: Dict[str, Any]) -> bool:
+    """
+    Recursively evaluate a declarative 'when' specification without dynamic code execution.
+    Fails closed on any unexpected or malformed structure.
+    """
+    if not isinstance(when_spec, dict):
+        raise ValueError(f"Predicate clause must be a dictionary, got: {type(when_spec)}")
 
-    return has_anaphylaxis or has_laryngeal_edema
+    # Check for invalid operators
+    for k in when_spec.keys():
+        if k not in VALID_OPERATORS:
+            raise ValueError(f"Unsupported or dangerous predicate operator '{k}' in rule clause")
 
+    # Handle 'all' (conjunction)
+    if "all" in when_spec:
+        clauses = when_spec["all"]
+        if not isinstance(clauses, list) or len(clauses) == 0:
+            raise ValueError(f"'all' operator requires a non-empty list of clauses: {when_spec}")
+        return all(_evaluate_expression(c, facts) for c in clauses)
 
-def _match_rf_hem_001(facts: Dict[str, Any]) -> bool:
-    """RF-HEM-001: Massive active hemorrhage or acute hemodynamic instability."""
-    return is_truthy(get_fact_value(facts, "symptoms.active_hemorrhage")) or is_truthy(get_fact_value(facts, "hpi.active_hemorrhage"))
+    # Handle 'any' (disjunction)
+    if "any" in when_spec:
+        clauses = when_spec["any"]
+        if not isinstance(clauses, list) or len(clauses) == 0:
+            raise ValueError(f"'any' operator requires a non-empty list of clauses: {when_spec}")
+        return any(_evaluate_expression(c, facts) for c in clauses)
 
+    # Handle leaf predicate on a slot
+    if "slot" in when_spec:
+        return _evaluate_leaf_predicate(when_spec, facts)
 
-def _match_rf_card_002(facts: Dict[str, Any]) -> bool:
-    """RF-CARD-002: Severe hypertensive urgency (Systolic BP >= 180 or Diastolic BP >= 110)."""
-    sbp = get_fact_value(facts, "vitals.sbp")
-    dbp = get_fact_value(facts, "vitals.dbp")
-
-    sbp_high = False
-    if sbp is not None:
-        try:
-            sbp_high = float(sbp) >= 180.0
-        except (ValueError, TypeError):
-            pass
-
-    dbp_high = False
-    if dbp is not None:
-        try:
-            dbp_high = float(dbp) >= 110.0
-        except (ValueError, TypeError):
-            pass
-
-    return sbp_high or dbp_high
-
-
-def _match_rf_inf_001(facts: Dict[str, Any]) -> bool:
-    """RF-INF-001: High fever with neck stiffness / meningism warning cluster."""
-    has_fever = is_truthy(get_fact_value(facts, "symptoms.fever")) or is_truthy(get_fact_value(facts, "hpi.fever"))
-    has_neck_stiffness = is_truthy(get_fact_value(facts, "symptoms.neck_stiffness")) or is_truthy(get_fact_value(facts, "hpi.neck_stiffness"))
-
-    return has_fever and has_neck_stiffness
+    raise ValueError(f"Invalid predicate clause: missing 'all', 'any', or 'slot': {when_spec}")
 
 
-def _match_rf_gi_001(facts: Dict[str, Any]) -> bool:
-    """RF-GI-001: Severe acute abdominal pain with rigidity or involuntary guarding."""
-    has_abdo_pain = is_truthy(get_fact_value(facts, "symptoms.abdominal_pain")) or is_truthy(get_fact_value(facts, "hpi.abdominal_pain"))
-    has_rigidity = is_truthy(get_fact_value(facts, "symptoms.abdominal_rigidity")) or is_truthy(get_fact_value(facts, "hpi.abdominal_rigidity"))
+def _extract_slot_paths(when_spec: Dict[str, Any]) -> Set[str]:
+    """Recursively extract all referenced slot paths for provenance and telemetry."""
+    paths: Set[str] = set()
+    if not isinstance(when_spec, dict):
+        return paths
 
-    return has_abdo_pain and has_rigidity
+    if "slot" in when_spec and isinstance(when_spec["slot"], str):
+        paths.add(when_spec["slot"])
 
+    for sub in when_spec.get("all", []):
+        paths.update(_extract_slot_paths(sub))
 
-def _match_rf_endo_001(facts: Dict[str, Any]) -> bool:
-    """RF-ENDO-001: Hyperglycemic crisis / diabetic warning cluster (known diabetic with severe vomiting/altered sensorium)."""
-    is_diabetic = is_truthy(get_fact_value(facts, "past_history.diabetes")) or is_truthy(get_fact_value(facts, "hpi.diabetes"))
-    has_vomiting = is_truthy(get_fact_value(facts, "symptoms.severe_vomiting")) or is_truthy(get_fact_value(facts, "hpi.severe_vomiting"))
-    has_altered = is_truthy(get_fact_value(facts, "symptoms.altered_sensorium")) or is_truthy(get_fact_value(facts, "hpi.altered_sensorium"))
+    for sub in when_spec.get("any", []):
+        paths.update(_extract_slot_paths(sub))
 
-    return is_diabetic and (has_vomiting or has_altered)
-
-
-def _match_rf_allergy_001(facts: Dict[str, Any]) -> bool:
-    """RF-ALLERGY-001: Documented severe drug allergy match."""
-    return is_truthy(get_fact_value(facts, "allergies.severe_drug_allergy")) or is_truthy(get_fact_value(facts, "allergies.anaphylaxis_history"))
-
-
-def _match_rf_ob_001(facts: Dict[str, Any]) -> bool:
-    """RF-OB-001: High-risk pregnancy clinical caution indicator."""
-    is_pregnant = is_truthy(get_fact_value(facts, "patient.is_pregnant")) or is_truthy(get_fact_value(facts, "hpi.is_pregnant"))
-    has_complication = is_truthy(get_fact_value(facts, "symptoms.pregnancy_bleeding")) or is_truthy(get_fact_value(facts, "symptoms.severe_headache"))
-
-    return is_pregnant and has_complication
+    return paths
 
 
 # ==============================================================================
-# Authoritative Rules Registry
+# Declarative Clinical Rule Loader
 # ==============================================================================
 
-CLINICAL_RULES_REGISTRY: List[ClinicalRule] = [
-    # Tier 1 Emergency Rules
-    ClinicalRule(
-        rule_id="RF-CARD-001",
-        title="Acute Coronary Warning Cluster",
-        description="Severe acute chest pain radiating to arm/jaw or associated with diaphoresis/dyspnea",
-        tier=RedFlagTier.TIER_1,
-        required_paths=["symptoms.chest_pain", "symptoms.radiation", "symptoms.diaphoresis", "symptoms.dyspnea"],
-        predicate=_match_rf_card_001,
-    ),
-    ClinicalRule(
-        rule_id="RF-RESP-001",
-        title="Acute Respiratory Compromise",
-        description="Acute severe dyspnea, stridor, or documented hypoxia (SpO2 < 90%)",
-        tier=RedFlagTier.TIER_1,
-        required_paths=["symptoms.stridor", "symptoms.dyspnea_severe", "vitals.spo2"],
-        predicate=_match_rf_resp_001,
-    ),
-    ClinicalRule(
-        rule_id="RF-NEURO-001",
-        title="Acute Neurological Deficit / Stroke Signs",
-        description="Sudden focal neurological deficit, facial droop, slurred speech, or acute altered sensorium",
-        tier=RedFlagTier.TIER_1,
-        required_paths=["symptoms.focal_deficit", "symptoms.facial_droop", "symptoms.speech_slur", "symptoms.altered_sensorium"],
-        predicate=_match_rf_neuro_001,
-    ),
-    ClinicalRule(
-        rule_id="RF-IMM-001",
-        title="Acute Anaphylaxis / Airway Edema",
-        description="Acute severe allergic reaction with laryngeal edema or respiratory compromise",
-        tier=RedFlagTier.TIER_1,
-        required_paths=["allergies.acute_anaphylaxis", "symptoms.laryngeal_edema"],
-        predicate=_match_rf_imm_001,
-    ),
-    ClinicalRule(
-        rule_id="RF-HEM-001",
-        title="Massive Active Hemorrhage",
-        description="Massive active hemorrhage or acute hemodynamic instability",
-        tier=RedFlagTier.TIER_1,
-        required_paths=["symptoms.active_hemorrhage"],
-        predicate=_match_rf_hem_001,
-    ),
+def get_clinical_content_dir() -> Path:
+    """Resolve the authoritative clinical-content redflags directory."""
+    env_path = os.getenv("CLINICAL_CONTENT_DIR")
+    if env_path:
+        path = Path(env_path) / "redflags"
+        if path.is_dir():
+            return path
 
-    # Tier 2 Urgent Rules
-    ClinicalRule(
-        rule_id="RF-CARD-002",
-        title="Severe Hypertensive Urgency",
-        description="Documented blood pressure exceeding SBP >= 180 mmHg or DBP >= 110 mmHg",
-        tier=RedFlagTier.TIER_2,
-        required_paths=["vitals.sbp", "vitals.dbp"],
-        predicate=_match_rf_card_002,
-    ),
-    ClinicalRule(
-        rule_id="RF-INF-001",
-        title="Meningism / Severe Infection Warning",
-        description="Fever accompanied by acute neck stiffness or signs of meningeal irritation",
-        tier=RedFlagTier.TIER_2,
-        required_paths=["symptoms.fever", "symptoms.neck_stiffness"],
-        predicate=_match_rf_inf_001,
-    ),
-    ClinicalRule(
-        rule_id="RF-GI-001",
-        title="Acute Peritoneal / Abdominal Rigidity",
-        description="Severe acute abdominal pain presenting with involuntary guarding or abdominal wall rigidity",
-        tier=RedFlagTier.TIER_2,
-        required_paths=["symptoms.abdominal_pain", "symptoms.abdominal_rigidity"],
-        predicate=_match_rf_gi_001,
-    ),
-    ClinicalRule(
-        rule_id="RF-ENDO-001",
-        title="Hyperglycemic Crisis Cluster",
-        description="Known diabetes presenting with severe acute vomiting or altered consciousness",
-        tier=RedFlagTier.TIER_2,
-        required_paths=["past_history.diabetes", "symptoms.severe_vomiting", "symptoms.altered_sensorium"],
-        predicate=_match_rf_endo_001,
-    ),
+    # Traverse upward from current file to find packages/clinical-content/redflags
+    cur = Path(__file__).resolve()
+    for parent in [cur] + list(cur.parents):
+        candidate = parent / "packages" / "clinical-content" / "redflags"
+        if candidate.is_dir():
+            return candidate
 
-    # Tier 3 Clinical Warning Rules
-    ClinicalRule(
-        rule_id="RF-ALLERGY-001",
-        title="Severe Drug Allergy Precaution",
-        description="Documented patient history of severe medication allergy or prior anaphylaxis",
-        tier=RedFlagTier.TIER_3,
-        required_paths=["allergies.severe_drug_allergy", "allergies.anaphylaxis_history"],
-        predicate=_match_rf_allergy_001,
-    ),
-    ClinicalRule(
-        rule_id="RF-OB-001",
-        title="High-Risk Pregnancy Caution",
-        description="Active pregnancy with acute complication indicators requiring obstetric review",
-        tier=RedFlagTier.TIER_3,
-        required_paths=["patient.is_pregnant", "symptoms.pregnancy_bleeding", "symptoms.severe_headache"],
-        predicate=_match_rf_ob_001,
-    ),
-]
+    # Absolute fallback relative to standard workspace layout
+    return Path("e:/AyuSetu-AI/packages/clinical-content/redflags")
+
+
+class DeclarativeRuleLoader:
+    """
+    Authoritative loader for versioned clinical-content red-flag rules.
+    Enforces CAB approval metadata, schema validity, uniqueness, and fail-closed security.
+    """
+
+    @classmethod
+    def parse_rule_dict(cls, data: Dict[str, Any], source_file: str = "<data>") -> ClinicalRule:
+        """Validate and parse a single rule dictionary into a ClinicalRule."""
+        # 1. Validate required fields
+        required_fields = ["id", "tier", "version", "title", "description", "when", "action", "approved_by", "approved_at"]
+        for rf in required_fields:
+            if rf not in data:
+                raise ValueError(f"Rule in {source_file} missing mandatory field '{rf}'")
+
+        rule_id = str(data["id"]).strip()
+        if not rule_id:
+            raise ValueError(f"Rule in {source_file} has empty 'id'")
+
+        # 2. Validate tier
+        try:
+            tier_val = int(data["tier"])
+            tier = RedFlagTier(tier_val)
+        except (ValueError, TypeError):
+            raise ValueError(f"Rule '{rule_id}' in {source_file} has invalid tier: {data.get('tier')}")
+
+        # 3. Validate version
+        try:
+            version = int(data["version"])
+            if version < 1:
+                raise ValueError()
+        except (ValueError, TypeError):
+            raise ValueError(f"Rule '{rule_id}' in {source_file} has invalid version: {data.get('version')}")
+
+        # 4. Validate approval metadata
+        approved_by = str(data["approved_by"]).strip()
+        approved_at = str(data["approved_at"]).strip()
+        if not approved_by or not approved_at:
+            raise ValueError(f"Rule '{rule_id}' in {source_file} missing required CAB approval metadata")
+
+        # 5. Validate action
+        action_data = data["action"]
+        if not isinstance(action_data, dict) or "escalate" not in action_data or "queue_priority" not in action_data:
+            raise ValueError(f"Rule '{rule_id}' in {source_file} has invalid 'action' block")
+        action = RuleAction(
+            escalate=str(action_data["escalate"]),
+            queue_priority=str(action_data["queue_priority"]),
+            patient_message_key=str(action_data.get("patient_message_key", "calm_wait")),
+        )
+
+        # 6. Validate predicate structure and pre-extract paths
+        when_spec = data["when"]
+        if not isinstance(when_spec, dict):
+            raise ValueError(f"Rule '{rule_id}' in {source_file} has non-dict 'when' specification")
+
+        # Dry-run evaluation on empty dict to validate syntax and fail closed if malformed
+        try:
+            _evaluate_expression(when_spec, {})
+        except ValueError as e:
+            raise ValueError(f"Rule '{rule_id}' in {source_file} has malformed predicate: {e}")
+
+        required_paths = sorted(list(_extract_slot_paths(when_spec)))
+
+        # Create safe closure for predicate evaluation
+        def predicate(facts: Dict[str, Any]) -> bool:
+            return _evaluate_expression(when_spec, facts)
+
+        return ClinicalRule(
+            rule_id=rule_id,
+            tier=tier,
+            version=version,
+            title=str(data["title"]).strip(),
+            description=str(data["description"]).strip(),
+            action=action,
+            approved_by=approved_by,
+            approved_at=approved_at,
+            required_paths=required_paths,
+            predicate=predicate,
+            raw_spec=data,
+        )
+
+    @classmethod
+    def load_from_directory(cls, directory: Optional[Path] = None) -> List[ClinicalRule]:
+        """
+        Load and validate all JSON rules from the target clinical-content directory.
+        Fails closed on missing directory, malformed JSON, schema violation, or duplicate IDs.
+        """
+        dir_path = directory or get_clinical_content_dir()
+        if not dir_path.is_dir():
+            raise RuntimeError(f"Clinical-content rules directory does not exist: {dir_path}")
+
+        json_files = sorted(dir_path.glob("*.json"))
+        if not json_files:
+            raise RuntimeError(f"No clinical-content rule files found in: {dir_path}")
+
+        loaded_rules: List[ClinicalRule] = []
+        seen_rule_ids: Set[str] = set()
+
+        for json_file in json_files:
+            try:
+                with open(json_file, "r", encoding="utf-8") as f:
+                    content = json.load(f)
+            except Exception as e:
+                raise ValueError(f"Failed to read/parse JSON from {json_file}: {e}")
+
+            rule = cls.parse_rule_dict(content, source_file=json_file.name)
+            if rule.rule_id in seen_rule_ids:
+                raise ValueError(f"Duplicate clinical rule ID '{rule.rule_id}' detected in {json_file.name}")
+
+            seen_rule_ids.add(rule.rule_id)
+            loaded_rules.append(rule)
+
+        return loaded_rules
+
+
+# ==============================================================================
+# Global Rules Registry (Lazily Initialized from Versioned Content)
+# ==============================================================================
+
+_ACTIVE_REGISTRY: Optional[List[ClinicalRule]] = None
+
+
+def get_clinical_rules_registry() -> List[ClinicalRule]:
+    """Retrieve active clinical rules registry loaded from versioned clinical-content."""
+    global _ACTIVE_REGISTRY
+    if _ACTIVE_REGISTRY is None:
+        _ACTIVE_REGISTRY = DeclarativeRuleLoader.load_from_directory()
+    return _ACTIVE_REGISTRY
+
+
+def reset_rules_registry_for_testing(rules: Optional[List[ClinicalRule]] = None) -> None:
+    """Reset or override active rules registry for test isolation."""
+    global _ACTIVE_REGISTRY
+    _ACTIVE_REGISTRY = rules
 
 
 def get_rule_by_id(rule_id: str) -> Optional[ClinicalRule]:
     """Look up a clinical rule by its authoritative identifier."""
-    for rule in CLINICAL_RULES_REGISTRY:
+    for rule in get_clinical_rules_registry():
         if rule.rule_id == rule_id:
             return rule
     return None
+
+
+# Module-level alias for backward-compatible engine consumption
+class _RegistryProxy(list):
+    """Proxy list dynamically reflecting active loaded registry."""
+    def __iter__(self):
+        return iter(get_clinical_rules_registry())
+
+    def __len__(self):
+        return len(get_clinical_rules_registry())
+
+    def __getitem__(self, idx):
+        return get_clinical_rules_registry()[idx]
+
+
+CLINICAL_RULES_REGISTRY = _RegistryProxy()

@@ -1,0 +1,22 @@
+{
+  "id": "RF-IMM-001",
+  "tier": 1,
+  "version": 1,
+  "title": "Acute Anaphylaxis / Airway Edema",
+  "description": "Acute severe allergic reaction with laryngeal edema or respiratory compromise",
+  "when": {
+    "any": [
+      { "slot": "allergies.acute_anaphylaxis", "is_true": true },
+      { "slot": "hpi.acute_anaphylaxis", "is_true": true },
+      { "slot": "symptoms.laryngeal_edema", "is_true": true },
+      { "slot": "hpi.laryngeal_edema", "is_true": true }
+    ]
+  },
+  "action": {
+    "escalate": "triage_desk",
+    "queue_priority": "immediate",
+    "patient_message_key": "calm_wait"
+  },
+  "approved_by": "CAB-2026-03",
+  "approved_at": "2026-03-14"
+}

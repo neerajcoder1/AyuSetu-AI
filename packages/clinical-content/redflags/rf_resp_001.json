@@ -1,0 +1,23 @@
+{
+  "id": "RF-RESP-001",
+  "tier": 1,
+  "version": 1,
+  "title": "Acute Respiratory Compromise",
+  "description": "Acute severe dyspnea, stridor, or documented hypoxia (SpO2 < 90%)",
+  "when": {
+    "any": [
+      { "slot": "symptoms.stridor", "is_true": true },
+      { "slot": "hpi.stridor", "is_true": true },
+      { "slot": "symptoms.dyspnea_severe", "is_true": true },
+      { "slot": "hpi.dyspnea_severe", "is_true": true },
+      { "slot": "vitals.spo2", "lt": 90.0 }
+    ]
+  },
+  "action": {
+    "escalate": "triage_desk",
+    "queue_priority": "immediate",
+    "patient_message_key": "calm_wait"
+  },
+  "approved_by": "CAB-2026-03",
+  "approved_at": "2026-03-14"
+}

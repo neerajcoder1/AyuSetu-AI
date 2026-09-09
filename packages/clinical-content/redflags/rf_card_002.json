@@ -1,0 +1,20 @@
+{
+  "id": "RF-CARD-002",
+  "tier": 2,
+  "version": 1,
+  "title": "Severe Hypertensive Urgency",
+  "description": "Documented blood pressure exceeding SBP >= 180 mmHg or DBP >= 110 mmHg",
+  "when": {
+    "any": [
+      { "slot": "vitals.sbp", "gte": 180.0 },
+      { "slot": "vitals.dbp", "gte": 110.0 }
+    ]
+  },
+  "action": {
+    "escalate": "physician_banner",
+    "queue_priority": "urgent",
+    "patient_message_key": "none"
+  },
+  "approved_by": "CAB-2026-03",
+  "approved_at": "2026-03-14"
+}
