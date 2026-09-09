@@ -224,14 +224,12 @@ def transcribe(
         confidence=round(confidence, 4),
     )
 
-    # Log summary (never log the full text at INFO to avoid patient data in logs)
-    _preview = raw.text[:50] + "…" if len(raw.text) > 50 else raw.text
+    # Log operational summary with ZERO-PHI
     logger.info(
         "Transcription done: language='%s', confidence=%.4f, "
-        "text_preview='%s', backend='%s', method='%s'",
+        "backend='%s', method='%s'",
         output.language,
         output.confidence,
-        _preview,
         config.backend,
         method,
     )
