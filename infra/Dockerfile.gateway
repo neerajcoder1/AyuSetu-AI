@@ -1,0 +1,43 @@
+FROM python:3.11-slim
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PORT=8080
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    gcc \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user
+RUN groupadd -g 10001 ayusetu && \
+    useradd -u 10001 -g ayusetu -s /bin/bash -m ayusetu
+
+# Copy dependency definitions
+COPY requirements.txt pyproject.toml ./
+RUN pip install --upgrade pip && \
+    pip install -r requirements.txt psycopg2-binary uuid6
+
+# Copy application source code
+COPY src/ ./src/
+COPY packages/ ./packages/
+COPY infra/ ./infra/
+COPY alembic.ini ./
+
+# Set ownership to non-root user
+RUN chown -R ayusetu:ayusetu /app
+
+USER ayusetu
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=10s --timeout=5s --retries=3 \
+  CMD curl -f http://localhost:8080/health || exit 1
+
+CMD ["uvicorn", "ayusetu.gateway.app:gateway_app", "--host", "0.0.0.0", "--port", "8080"]

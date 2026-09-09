@@ -34,6 +34,32 @@ services:
       retries: 5
       start_period: 3s
 
+  gateway:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.gateway
+    container_name: ayusetu-gateway
+    restart: unless-stopped
+    environment:
+      AYUSETU_ENV: ${AYUSETU_ENV:-dev}
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-ayusetu}:${POSTGRES_PASSWORD:-ayusetu_dev_secret}@postgres:5432/${POSTGRES_DB:-ayusetu_db}
+      REDIS_URL: redis://redis:6379/0
+      GATEWAY_PORT: 8080
+      DEBUG: "false"
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
 volumes:
   postgres_data:
   redis_data:

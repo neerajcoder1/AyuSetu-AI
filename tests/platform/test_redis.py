@@ -21,7 +21,7 @@ def test_session_cache_flow_with_mock():
     mock_redis = MagicMock()
     stored_data = {}
 
-    def mock_setex(key, ttl, value):
+    def mock_set(key, value, ex=None):
         stored_data[key] = value
 
     def mock_get(key):
@@ -31,10 +31,11 @@ def test_session_cache_flow_with_mock():
         stored_data.pop(key, None)
 
     mock_pipeline = MagicMock()
-    mock_pipeline.setex.side_effect = mock_setex
+    mock_pipeline.set.side_effect = mock_set
     mock_pipeline.delete.side_effect = mock_delete
     mock_redis.pipeline.return_value = mock_pipeline
     mock_redis.get.side_effect = mock_get
+    mock_redis.set.side_effect = mock_set
 
     with patch("ayusetu.common.session_cache.get_redis_client", return_value=mock_redis):
         cache = SessionCache(ttl_seconds=1800)  # 30 min

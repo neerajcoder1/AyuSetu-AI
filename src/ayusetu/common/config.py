@@ -54,6 +54,37 @@ class Settings(BaseSettings):
     ABDM_MODE: str = Field(default="mock", description="sandbox | prod | mock")
     HIS_ADAPTER: str = Field(default="none", description="fhir | hl7v2 | none")
 
+    # --- Gateway & Networking ---
+    GATEWAY_HOST: str = Field(default="0.0.0.0", description="Gateway bind host")
+    GATEWAY_PORT: int = Field(default=8080, description="Gateway port per PRD §22.2")
+    CORS_ALLOWED_ORIGINS: list[str] = Field(
+        default=["http://localhost:3000", "http://localhost:5173", "http://127.0.0.1:3000", "http://127.0.0.1:5173"],
+        description="Strict CORS allowed origins"
+    )
+
+    # --- Request Size Limits (PRD §21.6) ---
+    MAX_UPLOAD_BODY_BYTES: int = Field(default=25 * 1024 * 1024, description="25 MB for document uploads")
+    MAX_JSON_BODY_BYTES: int = Field(default=256 * 1024, description="256 KB for JSON payloads")
+
+    # --- Rate Limiting (PRD §21.6) ---
+    RATE_LIMIT_DEVICE_RPM: int = Field(default=60, description="Per device sustained requests/min")
+    RATE_LIMIT_DEVICE_BURST: int = Field(default=120, description="Per device burst limit")
+    RATE_LIMIT_SESSION_TOTAL: int = Field(default=300, description="Per session total requests")
+    RATE_LIMIT_PWA_RPM: int = Field(default=30, description="Per IP on public PWA requests/min")
+    RATE_LIMIT_DOC_UPLOAD_TOTAL: int = Field(default=20, description="Document uploads per session")
+
+    # --- Service Catalogue (PRD §22.2) ---
+    SERVICE_DIALOGUE_URL: str = Field(default="http://localhost:8101")
+    SERVICE_SPEECH_URL: str = Field(default="http://localhost:8102")
+    SERVICE_DOCPIPE_URL: str = Field(default="http://localhost:8103")
+    SERVICE_SUMMARY_URL: str = Field(default="http://localhost:8104")
+    SERVICE_REDFLAG_URL: str = Field(default="http://localhost:8105")
+    SERVICE_TERMINOLOGY_URL: str = Field(default="http://localhost:8106")
+    SERVICE_MPI_URL: str = Field(default="http://localhost:8107")
+    SERVICE_CONSENT_URL: str = Field(default="http://localhost:8108")
+    SERVICE_AUDIT_URL: str = Field(default="http://localhost:8109")
+    SERVICE_DEID_URL: str = Field(default="http://localhost:8110")
+
     # --- Security & Network ---
     MTLS_CA_BUNDLE: Optional[str] = None
     REQUEST_SIGNING_PUBKEYS: Optional[str] = None

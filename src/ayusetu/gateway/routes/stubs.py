@@ -1,0 +1,353 @@
+"""
+API Gateway v1 REST Endpoints & Routing Stubs
+=============================================
+Authoritative routes per PRD v2.0 §22.5.
+Provides strict schema validation and service routing boundaries.
+"""
+
+from typing import Any, Dict, List, Optional
+import uuid
+import uuid6
+from pydantic import BaseModel, Field
+from fastapi import APIRouter, Header, HTTPException, Query, Request, Response, status
+
+from ayusetu.common.config import settings
+from ayusetu.common.session_cache import SessionCache
+from ayusetu.gateway.errors import ErrorCode, AyuSetuGatewayError
+
+router = APIRouter()
+session_cache = SessionCache()
+
+
+# --- Request / Response Models ---
+class SessionCreateRequest(BaseModel):
+    channel: str = Field(default="kiosk", pattern="^(kiosk|pwa_self|pwa_companion|assisted)$")
+    department: str = Field(default="Kayachikitsa")
+    visit_type: str = Field(default="new", pattern="^(new|followup_stable|followup_new|walkin)$")
+    intake_depth: str = Field(default="full", pattern="^(fast|interval|delta|full)$")
+
+
+class SessionCreateResponse(BaseModel):
+    session_id: str
+    encounter_id: str
+    token: str
+    ttl_seconds: int
+
+
+class IdentifyRequest(BaseModel):
+    auth_type: str = Field(..., pattern="^(abha|otp|provisional)$")
+    identifier: Optional[str] = None
+    mobile: Optional[str] = None
+    name: Optional[str] = None
+
+
+class ConsentRequest(BaseModel):
+    purposes: Dict[str, bool] = Field(
+        ...,
+        json_schema_extra={"example": {"clinical": True, "abdm": True, "qi": False, "research": False}}
+    )
+    language: str = Field(default="hi")
+    notice_version: str = Field(default="dpdp-v1.0")
+
+
+class SubmitSessionRequest(BaseModel):
+    confirmed_by: str = Field(..., pattern="^(patient|companion|attendant|clinician)$")
+    readback_accepted: bool = True
+
+
+class SummaryEditRequest(BaseModel):
+    slot_path: str
+    old_value: Optional[Any] = None
+    new_value: Any
+    reason: Optional[str] = None
+
+
+class SignEncounterRequest(BaseModel):
+    physician_id: str
+    pin_or_token: Optional[str] = None
+
+
+class AlertAcknowledgeRequest(BaseModel):
+    disposition: str
+    notes: Optional[str] = None
+
+
+class CompanionLinkRequest(BaseModel):
+    nominated_mobile: str = Field(..., min_length=10, max_length=15)
+    relationship: Optional[str] = None
+
+
+class DeidExportRequest(BaseModel):
+    date_from: str
+    date_to: str
+    purpose: str = "research"
+    approver_1: str
+    approver_2: str
+
+
+# --- Endpoints per PRD §22.5 ---
+
+@router.post("/sessions", response_model=SessionCreateResponse, status_code=status.HTTP_201_CREATED)
+def create_session(
+    payload: Optional[SessionCreateRequest] = None,
+    x_device_fingerprint: Optional[str] = Header(None)
+):
+    """Create an encounter session and return session token and encounter ID."""
+    enc_id = uuid6.uuid7()
+    channel = payload.channel if payload else "kiosk"
+    
+    sess_data = session_cache.create_session(
+        encounter_id=enc_id,
+        channel=channel,
+        device_fingerprint=x_device_fingerprint
+    )
+    return SessionCreateResponse(
+        session_id=sess_data["session_id"],
+        encounter_id=sess_data["encounter_id"],
+        token=sess_data["token"],
+        ttl_seconds=sess_data["ttl_seconds"]
+    )
+
+
+@router.post("/sessions/{id}/identify", status_code=status.HTTP_200_OK)
+def identify_patient(id: str, payload: IdentifyRequest):
+    """Identify patient via ABHA, OTP, or provisional identity."""
+    session = session_cache.get_session(id)
+    if not session:
+        raise AyuSetuGatewayError(ErrorCode.SESSION_EXPIRED, "Session expired or not found", 401)
+    
+    session_cache.update_session(id, {"status": "CONSENT", "identity_type": payload.auth_type})
+    return {
+        "status": "matched",
+        "patient_id": str(uuid6.uuid7()),
+        "provisional": payload.auth_type == "provisional",
+        "match_confidence": 1.0 if payload.auth_type != "provisional" else 0.5
+    }
+
+
+@router.get("/mpi/candidates", status_code=status.HTTP_200_OK)
+def get_mpi_candidates(
+    name: Optional[str] = None,
+    dob: Optional[str] = None,
+    mobile: Optional[str] = None
+):
+    """Fetch candidate patient matches for the review queue."""
+    return {"candidates": [], "count": 0}
+
+
+@router.post("/sessions/{id}/consent", status_code=status.HTTP_200_OK)
+def record_consent(id: str, payload: ConsentRequest):
+    """Record DPDP consent with hash chain generation."""
+    session = session_cache.get_session(id)
+    if not session:
+        raise AyuSetuGatewayError(ErrorCode.SESSION_EXPIRED, "Session expired or not found", 401)
+
+    # Clinical consent is mandatory to proceed to interview
+    if not payload.purposes.get("clinical", False):
+        raise AyuSetuGatewayError(
+            ErrorCode.CONSENT_REQUIRED,
+            "Clinical processing consent is required to proceed with intake",
+            403
+        )
+
+    session_cache.update_session(id, {"status": "INTERVIEW", "purposes": payload.purposes})
+    return {
+        "status": "recorded",
+        "consent_id": str(uuid6.uuid7()),
+        "chain_hash": "sha256_mock_chain_hash_entry"
+    }
+
+
+@router.post("/sessions/{id}/documents", status_code=status.HTTP_202_ACCEPTED)
+def upload_document(id: str, request: Request):
+    """Upload physical document image / PDF."""
+    session = session_cache.get_session(id)
+    if not session:
+        raise AyuSetuGatewayError(ErrorCode.SESSION_EXPIRED, "Session expired or not found", 401)
+
+    doc_id = str(uuid6.uuid7())
+    return {
+        "document_id": doc_id,
+        "quality_score": 0.95,
+        "ocr_status": "processing",
+        "page_no": 1
+    }
+
+
+@router.get("/sessions/{id}/documents/{doc_id}", status_code=status.HTTP_200_OK)
+def get_document_extraction(id: str, doc_id: str):
+    """Fetch document extraction status and entities."""
+    return {
+        "document_id": doc_id,
+        "ocr_status": "completed",
+        "quality_score": 0.95,
+        "entities": []
+    }
+
+
+@router.post("/sessions/{id}/submit", status_code=status.HTTP_202_ACCEPTED)
+def submit_session(id: str, payload: SubmitSessionRequest):
+    """Seal session, trigger summary generation, and purge session cache."""
+    session = session_cache.get_session(id)
+    if not session:
+        raise AyuSetuGatewayError(ErrorCode.SESSION_EXPIRED, "Session expired or not found", 401)
+
+    encounter_id = session.get("encounter_id", str(uuid6.uuid7()))
+    session_cache.panic_clear(id)
+
+    return {
+        "encounter_id": encounter_id,
+        "summary_status": "generating",
+        "poll_after_ms": 1500,
+        "session_purged": True
+    }
+
+
+@router.post("/sessions/{id}/panic-clear", status_code=status.HTTP_200_OK)
+def panic_clear_session(id: str):
+    """Immediate station purge (<2s) per PRD §21.6."""
+    cleared = session_cache.panic_clear(id)
+    return {
+        "status": "cleared",
+        "session_id": id,
+        "purged": cleared
+    }
+
+
+@router.get("/encounters/{id}/summary", status_code=status.HTTP_200_OK)
+def get_encounter_summary(id: str):
+    """Fetch physician-facing clinical summary with provenance citations."""
+    return {
+        "status": "preliminary",
+        "model_version": "ayusetu-sum-1.2",
+        "sections": [
+            {
+                "id": "hpi",
+                "title": "History of Present Illness",
+                "clauses": [
+                    {
+                        "text": "Epigastric pain for three months, worse after meals.",
+                        "slots": ["hpi.site", "hpi.duration", "hpi.aggravating"],
+                        "source": {"type": "utterance", "ids": ["u-12", "u-14"]},
+                        "confidence": 0.91,
+                        "elicited": True
+                    }
+                ]
+            },
+            {
+                "id": "allergy",
+                "title": "Allergies",
+                "clauses": [{"text": "Not elicited", "elicited": False}]
+            }
+        ],
+        "alerts": [],
+        "coding": [{"system": "NAMASTE", "code": "AAE-16", "confidence": 0.81}]
+    }
+
+
+@router.patch("/encounters/{id}/summary", status_code=status.HTTP_200_OK)
+def patch_encounter_summary(id: str, payload: SummaryEditRequest):
+    """Apply physician edits and record diff in summary_edit."""
+    return {
+        "status": "updated",
+        "encounter_id": id,
+        "slot_path": payload.slot_path,
+        "recorded_in_summary_edit": True
+    }
+
+
+@router.post("/encounters/{id}/sign", status_code=status.HTTP_200_OK)
+def sign_encounter_summary(id: str, payload: SignEncounterRequest):
+    """Sign summary: preliminary -> final."""
+    return {
+        "status": "final",
+        "encounter_id": id,
+        "signed_by": payload.physician_id
+    }
+
+
+@router.get("/encounters/{id}/fhir", status_code=status.HTTP_200_OK)
+def get_encounter_fhir(id: str):
+    """Retrieve FHIR R4 document bundle."""
+    return {
+        "resourceType": "Bundle",
+        "type": "document",
+        "entry": [
+            {
+                "resource": {
+                    "resourceType": "Composition",
+                    "status": "preliminary",
+                    "title": "AyuSetu Pre-Consultation History Summary"
+                }
+            }
+        ]
+    }
+
+
+@router.get("/alerts", status_code=status.HTTP_200_OK)
+def get_alerts(tier: int = Query(1, ge=1, le=3), status: str = "open"):
+    """Tier 1/2/3 alert queue for the Ops Console."""
+    return {"tier": tier, "status": status, "alerts": []}
+
+
+@router.post("/alerts/{id}/acknowledge", status_code=status.HTTP_200_OK)
+def acknowledge_alert(id: str, payload: AlertAcknowledgeRequest):
+    """Acknowledge alert with disposition."""
+    return {"alert_id": id, "status": "acknowledged", "disposition": payload.disposition}
+
+
+@router.post("/terminology/$translate", status_code=status.HTTP_200_OK)
+def translate_terminology(code: str, system: str = "NAMASTE"):
+    """NAMASTE to ICD-11 TM2/MMS translation."""
+    return {
+        "source_code": code,
+        "source_system": system,
+        "matches": [
+            {"system": "ICD-11 TM2", "code": "SK25", "display": "Amlapitta (TM2)", "confidence": 0.85}
+        ]
+    }
+
+
+@router.get("/terminology/interactions", status_code=status.HTTP_200_OK)
+def check_interactions(drugs: List[str] = Query(...)):
+    """Herb-drug and drug-drug interaction check."""
+    return {"checked_drugs": drugs, "interactions": []}
+
+
+@router.get("/encounters/{id}/prior", status_code=status.HTTP_200_OK)
+def get_prior_records(id: str):
+    """Fetch prior records via ABDM M3 / local history."""
+    return {"encounter_id": id, "records": []}
+
+
+@router.post("/sessions/{id}/resume", status_code=status.HTTP_200_OK)
+def resume_session(id: str, qr_payload: Dict[str, Any]):
+    """Claim incomplete PWA session at station via QR code."""
+    return {"session_id": id, "status": "resumed"}
+
+
+@router.post("/sessions/{id}/companion-link", status_code=status.HTTP_200_OK)
+def issue_companion_link(id: str, payload: CompanionLinkRequest):
+    """Issue scoped magic link to a patient-nominated phone number."""
+    return {
+        "session_id": id,
+        "nominated_mobile": payload.nominated_mobile,
+        "magic_link": f"/pwa/companion/{id}?token={SessionCache.generate_token()}",
+        "expires_in_minutes": settings.COMPANION_LINK_TTL_MINUTES
+    }
+
+
+@router.post("/exports", status_code=status.HTTP_202_ACCEPTED)
+def request_deid_export(payload: DeidExportRequest):
+    """Request de-identified export with two-person authorization."""
+    if payload.approver_1 == payload.approver_2:
+        raise AyuSetuGatewayError(
+            ErrorCode.POLICY_DENIED,
+            "Two distinct approvers are required for de-identified data export (Separation of Duties)",
+            403
+        )
+    return {
+        "export_id": str(uuid6.uuid7()),
+        "status": "pending_processing",
+        "k_anonymity_threshold": 5
+    }
