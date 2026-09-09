@@ -3,8 +3,7 @@ import tempfile
 import os
 import subprocess
 from pathlib import Path
-from typing import Any, Dict, Optional
-
+from typing import Any, Dict, Optional, List
 import soundfile as sf
 import imageio_ffmpeg
 from fastapi import FastAPI, HTTPException, UploadFile, File, Depends, status
@@ -13,13 +12,18 @@ from pydantic import BaseModel
 
 from ayusetu.ai.voice.pipeline.voice_pipeline import VoicePipeline
 from contracts.dialogue import DialogueState
+from ayusetu.ai.clinical.document_ai.ocr import MockOCRProvider
+from ayusetu.ai.clinical.document_ai.entity_extractor import extract_entities
+from ayusetu.ai.clinical.summary.composer import SummaryGenerator
+from ayusetu.ai.clinical.summary.contracts import ClinicalSummary, RejectionReason, SummaryEdit, SummaryRejection
+from ayusetu.ai.clinical.summary import physician_review
 
 app = FastAPI(title="AyuSetu Voice API")
 
 # Single shared pipeline instance (in‑memory session manager)
 voice_pipeline = VoicePipeline()
 
-# ---------- Pydantic response models ----------
+# ---------- Pydantic response & request models ----------
 class SessionCreateResponse(BaseModel):
     session_id: str
 
@@ -33,9 +37,24 @@ class TurnResponse(BaseModel):
     response_sample_rate: Optional[int] = None
     response_duration: Optional[float] = None
     session_id: Optional[str] = None
+    red_flags: Optional[List[Dict[str, Any]]] = None
 
 class DialogueStateResponse(BaseModel):
     state: DialogueState
+
+class SignOffRequest(BaseModel):
+    physician_id: str
+
+class EditRequest(BaseModel):
+    slot_path: str
+    new_value: Optional[str] = None
+    reason: str
+    physician_id: str
+
+class RejectRequest(BaseModel):
+    reason: RejectionReason
+    physician_id: str
+    detail: Optional[str] = None
 
 # ---------------- Helper functions ----------------
 def _convert_to_wav(src_path: Path) -> Path:
@@ -133,6 +152,7 @@ def turn(
         response_sample_rate=result.get("response_sample_rate"),
         response_duration=result.get("response_duration"),
         session_id=result.get("session_id"),
+        red_flags=result.get("red_flags", []),
     )
 
 @app.get(
@@ -154,3 +174,117 @@ def delete_session(session_id: str):
     except KeyError:
         raise HTTPException(status_code=404, detail="Session not found")
     return JSONResponse(status_code=status.HTTP_204_NO_CONTENT, content=None)
+
+# ------------------- Document AI Endpoint -------------------
+@app.post("/sessions/{session_id}/documents")
+def upload_document(session_id: str, document: UploadFile = File(...)):
+    try:
+        session = voice_pipeline.get_session(session_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    content = document.file.read()
+    # Decode text for OCR parsing
+    text = content.decode("utf-8", errors="ignore")
+    from ayusetu.ai.clinical.document_ai.contracts import OCRResult
+    ocr_result = OCRResult(page_no=1, raw_text=text, mean_confidence=0.9)
+    entities = extract_entities(ocr_result.raw_text)
+    session.document_entities.extend(entities)
+
+    return {
+        "status": "success",
+        "session_id": session_id,
+        "filename": document.filename,
+        "extracted_entities_count": len(entities),
+        "entities": [e.model_dump(mode="json") for e in entities],
+    }
+
+# ------------------- Clinical Summary Endpoints -------------------
+@app.post("/sessions/{session_id}/summary", response_model=ClinicalSummary)
+def generate_summary(session_id: str):
+    try:
+        session = voice_pipeline.get_session(session_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    collected_info = {
+        s.value if hasattr(s, "value") else str(s): str(v)
+        for s, v in session.state.collected_info.items()
+    }
+    missing_slots = [
+        s.value if hasattr(s, "value") else str(s)
+        for s in session.state.missing_slots
+    ]
+
+    summary = SummaryGenerator().generate(
+        encounter_id=session_id,
+        collected_info=collected_info,
+        missing_slots=missing_slots,
+        red_flag_events=session.red_flag_events,
+        document_entities=session.document_entities,
+    )
+    session.summary = summary
+    return summary
+
+# ------------------- Physician Review Endpoints -------------------
+@app.post("/sessions/{session_id}/summary/sign-off", response_model=ClinicalSummary)
+def sign_off_summary_endpoint(session_id: str, req: SignOffRequest):
+    try:
+        session = voice_pipeline.get_session(session_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    if session.summary is None:
+        raise HTTPException(status_code=400, detail="No summary generated yet for this session")
+
+    try:
+        updated = physician_review.sign(session.summary, req.physician_id)
+    except physician_review.AlreadySignedError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return updated
+
+@app.put("/sessions/{session_id}/summary/edit")
+def edit_summary_endpoint(session_id: str, req: EditRequest):
+    try:
+        session = voice_pipeline.get_session(session_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    if session.summary is None:
+        raise HTTPException(status_code=400, detail="No summary generated yet for this session")
+
+    try:
+        edit_record = physician_review.edit_field(
+            session.summary, req.slot_path, req.new_value, req.reason, req.physician_id
+        )
+    except physician_review.AlreadySignedError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except KeyError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return {
+        "edit_record": edit_record.model_dump(mode="json"),
+        "summary": session.summary.model_dump(mode="json"),
+    }
+
+@app.post("/sessions/{session_id}/summary/reject")
+def reject_summary_endpoint(session_id: str, req: RejectRequest):
+    try:
+        session = voice_pipeline.get_session(session_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    if session.summary is None:
+        raise HTTPException(status_code=400, detail="No summary generated yet for this session")
+
+    try:
+        rejection_record = physician_review.reject(
+            session.summary, req.reason, req.physician_id, req.detail
+        )
+    except physician_review.AlreadySignedError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return {
+        "rejection": rejection_record.model_dump(mode="json"),
+    }
