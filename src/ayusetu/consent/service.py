@@ -14,8 +14,11 @@ per PRD v2.0 §21.7 & §21.8.
 
 from datetime import datetime, timezone
 import hashlib
+import logging
 from typing import Any, Dict, List, Optional
 import uuid6
+
+logger = logging.getLogger("ayusetu.consent.service")
 
 from ayusetu.common.config import settings
 from ayusetu.gateway.auth.models import Principal, Role
@@ -37,6 +40,7 @@ from ayusetu.consent.models import (
 from ayusetu.consent.guardian import ConsentAuthorityValidator, GuardianVerificationAdapter
 from ayusetu.consent.offline_chain import station_consent_chain, canonical_json
 from ayusetu.consent.abdm_adapter import abdm_manager
+from ayusetu.consent.repository import ConsentRepository
 from ayusetu.consent.event_hooks import (
     emit_consent_granted,
     emit_consent_withdrawn,
@@ -51,10 +55,9 @@ from ayusetu.consent.event_hooks import (
 class ConsentService:
     """Core domain service for DPDP consent management and gating."""
 
-    def __init__(self):
-        # In-memory store of consent records: encounter_id -> List[ConsentRecordDTO]
-        # Preserves full immutable historical version trail for each encounter
-        self._encounter_records: Dict[str, List[ConsentRecordDTO]] = {}
+    def __init__(self, repository: Optional[ConsentRepository] = None):
+        # Authoritative PostgreSQL repository for immutable, versioned consent records
+        self._repo = repository or ConsentRepository()
         # Erasure store: request_id -> ErasureResponse, and (patient_id, encounter_id) -> request_id
         self._erasure_store: Dict[str, ErasureResponse] = {}
         self._erasure_index: Dict[str, str] = {}
@@ -84,8 +87,8 @@ class ConsentService:
 
         purposes_dict = request.purposes.to_dict()
 
-        # 2. Determine Version Number (monotonically increasing)
-        history = self._encounter_records.get(enc_id, [])
+        # 2. Determine Version Number from PostgreSQL
+        history = self._repo.get_consent_history(enc_id)
         version = len(history) + 1
 
         # 3. Calculate deterministic chain hash
@@ -110,7 +113,7 @@ class ConsentService:
             is_offline=is_offline,
         )
 
-        record = ConsentRecordDTO(
+        record_dto = ConsentRecordDTO(
             id=consent_id,
             patient_id=pat_id,
             encounter_id=enc_id,
@@ -127,10 +130,8 @@ class ConsentService:
             guardian_id=guardian_id,
         )
 
-        # Store in immutable history without modifying earlier records
-        if enc_id not in self._encounter_records:
-            self._encounter_records[enc_id] = []
-        self._encounter_records[enc_id].append(record)
+        # Store durably in PostgreSQL (fail-closed)
+        saved_record = self._repo.save_consent(record_dto)
 
         # 5. Emit zero-PHI security event
         emit_consent_granted(
@@ -145,19 +146,15 @@ class ConsentService:
             guardian_id=guardian_id,
         )
 
-        return record
+        return saved_record
 
     def get_active_consent(self, encounter_id: str) -> Optional[ConsentRecordDTO]:
-        """Retrieve latest active consent record for an encounter."""
-        history = self._encounter_records.get(encounter_id, [])
-        if not history:
-            return None
-        # Return latest version
-        return history[-1]
+        """Retrieve latest active consent record for an encounter from PostgreSQL."""
+        return self._repo.get_active_consent(encounter_id)
 
     def get_consent_history(self, encounter_id: str) -> List[ConsentRecordDTO]:
-        """Retrieve complete immutable version trail for an encounter."""
-        return list(self._encounter_records.get(encounter_id, []))
+        """Retrieve complete immutable version trail for an encounter from PostgreSQL."""
+        return self._repo.get_consent_history(encounter_id)
 
     def withdraw_consent(
         self,
@@ -205,8 +202,8 @@ class ConsentService:
         if not new_purposes.get("abdm", False):
             abdm_manager.withdraw_artefact(enc_id)
 
-        # Create new versioned record - DO NOT mutate `current` (true immutability!)
-        history = self._encounter_records[enc_id]
+        # Create new versioned record in PostgreSQL - DO NOT mutate `current` (true immutability!)
+        history = self._repo.get_consent_history(enc_id)
         version = len(history) + 1
         new_consent_id = str(uuid6.uuid7())
         now = utc_now()
@@ -239,7 +236,7 @@ class ConsentService:
             guardian_id=current.guardian_id,
         )
 
-        history.append(new_record)
+        saved_record = self._repo.save_consent(new_record)
 
         # Emit audit event
         emit_consent_withdrawn(
@@ -252,7 +249,7 @@ class ConsentService:
             reason=request.reason,
         )
 
-        return new_record
+        return saved_record
 
     def request_erasure(
         self,
@@ -355,7 +352,7 @@ class ConsentService:
             is_offline=True,
         )
 
-        history = self._encounter_records.get(enc_id, [])
+        history = self._repo.get_consent_history(enc_id)
         version = len(history) + 1
         consent_id = str(uuid6.uuid7())
 
@@ -376,9 +373,7 @@ class ConsentService:
             guardian_id=payload.guardian_context.guardian_id if payload.guardian_context else None,
         )
 
-        if enc_id not in self._encounter_records:
-            self._encounter_records[enc_id] = []
-        self._encounter_records[enc_id].append(record)
+        saved_record = self._repo.save_consent(record)
 
         # 3. Emit offline capture event
         emit_offline_consent_captured(
@@ -389,7 +384,7 @@ class ConsentService:
             entry_hash=entry.entry_hash,
         )
 
-        return record
+        return saved_record
 
     def sync_offline_consent(self) -> OfflineSyncResponse:
         """
@@ -437,24 +432,34 @@ class ConsentService:
         """
         Consent Gating Check:
         Returns True if and only if valid, non-withdrawn clinical consent exists.
+        Fails closed on database failure or missing consent.
         """
-        record = self.get_active_consent(encounter_id)
-        if not record:
+        try:
+            record = self.get_active_consent(encounter_id)
+            if not record:
+                return False
+            if record.status == ConsentStatus.WITHDRAWN:
+                return False
+            return bool(record.purposes.get("clinical", False))
+        except Exception as e:
+            logger.error("Database error during clinical consent check for encounter %s: %s", encounter_id, e)
             return False
-        if record.status == ConsentStatus.WITHDRAWN:
-            return False
-        return bool(record.purposes.get("clinical", False))
 
     def check_purpose_consent(self, encounter_id: str, purpose: str) -> bool:
         """
         Check if a specific purpose (clinical, abdm, qi, research) is active.
+        Fails closed on database failure or missing consent.
         """
-        record = self.get_active_consent(encounter_id)
-        if not record:
+        try:
+            record = self.get_active_consent(encounter_id)
+            if not record:
+                return False
+            if record.status == ConsentStatus.WITHDRAWN:
+                return False
+            return bool(record.purposes.get(purpose.lower(), False))
+        except Exception as e:
+            logger.error("Database error during purpose consent check (%s) for encounter %s: %s", purpose, encounter_id, e)
             return False
-        if record.status == ConsentStatus.WITHDRAWN:
-            return False
-        return bool(record.purposes.get(purpose.lower(), False))
 
     def is_external_sharing_permitted(self, encounter_id: str) -> bool:
         """
@@ -462,6 +467,7 @@ class ConsentService:
         Sharing outside the hospital is permitted ONLY if:
         1. ABDM purpose is explicitly consented, AND
         2. Authoritative ABDM artefact is in AVAILABLE status.
+        Fails closed on database failure.
         """
         if not self.check_purpose_consent(encounter_id, "abdm"):
             return False
@@ -480,8 +486,8 @@ class ConsentService:
             session_cache.panic_clear(encounter_id)
 
     def reset_state(self) -> None:
-        """Reset service in-memory state (for test isolation)."""
-        self._encounter_records.clear()
+        """Reset service state for test suite isolation."""
+        self._repo.clear_for_testing()
         self._erasure_store.clear()
         self._erasure_index.clear()
         station_consent_chain.clear()
