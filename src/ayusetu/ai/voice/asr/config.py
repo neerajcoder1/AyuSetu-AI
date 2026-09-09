@@ -1,5 +1,5 @@
 """
-AyuSetu AI — ASR Configuration
+Ayusetu AI — ASR Configuration
 ================================
 All runtime configuration is read from environment variables.
 No model IDs, device settings, or thresholds are hard-coded anywhere else.
@@ -36,7 +36,7 @@ from dotenv import load_dotenv
 
 # Load .env from the project root (three levels up from this file:
 # ayusetu.ai/asr/config.py → ayusetu.ai/asr/ → ayusetu.ai/ → project root)
-_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_PROJECT_ROOT = Path(__file__).resolve().parents[4]
 _ENV_FILE = _PROJECT_ROOT / ".env"
 load_dotenv(dotenv_path=_ENV_FILE, override=False)
 
@@ -93,9 +93,22 @@ class ASRConfig:
     """HuggingFace token for private/gated model access. Never log this."""
 
 
-def get_config() -> ASRConfig:
+def get_adapter_path() -> Optional[Path]:
+    """Return the absolute Path to a local PEFT adapter directory if
+    ASR_ADAPTER_PATH is set and points to an existing directory.
+    Returns ``None`` otherwise.
     """
-    Build and return an ASRConfig from environment variables.
+    env_path = os.environ.get("ASR_ADAPTER_PATH", "").strip()
+    if not env_path:
+        return None
+    p = Path(env_path).expanduser().absolute()
+    if not p.is_dir():
+        return None
+    return p
+
+
+def get_config() -> ASRConfig:
+    """Build and return an ASRConfig from environment variables.
 
     Raises
     ------

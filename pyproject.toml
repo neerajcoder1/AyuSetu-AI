@@ -9,7 +9,7 @@ description = "AyuSetu AI — Conversational AI, Dialogue Engine & ASR Pipeline"
 requires-python = ">=3.10"
 dependencies = [
     "transformers==4.44.2",
-    "torch",
+    "peft==0.17.1",
     "huggingface-hub>=0.22.0",
     "librosa>=0.10.2",
     "soundfile>=0.12.1",
