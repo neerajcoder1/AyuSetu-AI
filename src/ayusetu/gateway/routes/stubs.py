@@ -212,12 +212,36 @@ def record_consent(id: str, payload: ConsentRequest):
             403
         )
 
-    session_cache.update_session(id, {"status": "INTERVIEW", "purposes": payload.purposes})
+    from ayusetu.consent.service import consent_service
+    from ayusetu.consent.models import Purposes, ConsentGrantRequest
+
+    enc_id = session.get("encounter_id") or id
+    pat_id = session.get("patient_id") or str(uuid6.uuid7())
+
+    purposes_obj = Purposes(
+        clinical=payload.purposes.get("clinical", False),
+        abdm=payload.purposes.get("abdm", False),
+        qi=payload.purposes.get("qi", False),
+        research=payload.purposes.get("research", False),
+    )
+
+    consent_record = consent_service.grant_consent(
+        ConsentGrantRequest(
+            patient_id=pat_id,
+            encounter_id=enc_id,
+            purposes=purposes_obj,
+            language=payload.language,
+            notice_version=payload.notice_version,
+        )
+    )
+
+    session_cache.update_session(id, {"status": "INTERVIEW", "purposes": payload.purposes, "consent_id": consent_record.id})
     return {
         "status": "recorded",
-        "consent_id": str(uuid6.uuid7()),
-        "chain_hash": "sha256_mock_chain_hash_entry"
+        "consent_id": consent_record.id,
+        "chain_hash": consent_record.chain_hash or "sha256_mock_chain_hash_entry"
     }
+
 
 
 @router.post("/sessions/{id}/documents", status_code=status.HTTP_202_ACCEPTED)

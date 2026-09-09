@@ -97,6 +97,13 @@ class RateLimiter:
                 return False, 60
             return True, 0
 
+    @classmethod
+    def clear_in_memory(cls) -> None:
+        """Reset in-memory buckets and counters (for test isolation)."""
+        _in_memory_buckets.clear()
+        _in_memory_counters.clear()
+
+
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """
