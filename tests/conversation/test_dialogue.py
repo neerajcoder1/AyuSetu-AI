@@ -82,10 +82,11 @@ def test_duplicate_information(engine):
     
     # Let's say user gives ONSET
     asr2 = ASROutput(text="kal se", language="hi", confidence=0.9)
-    # Actually PlaceholderExtractor doesn't extract onset in our mock rules yet.
-    # So if it fails to extract, missing_slots[0] stays ONSET.
+    # The rule-based extractor correctly recognises "kal" as onset (yesterday).
+    # The planner therefore collects ONSET and advances to the next slot (SEVERITY).
     engine.step(asr2, state)
-    assert state.missing_slots[0] == ClinicalSlot.ONSET
+    assert ClinicalSlot.ONSET in state.collected_info
+    assert state.missing_slots[0] == ClinicalSlot.SEVERITY
 
 def test_independence_llm_cannot_change_sequence(engine):
     """
