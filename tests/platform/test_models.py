@@ -184,3 +184,57 @@ def test_audit_event_model(db_session):
     assert ev.action == "READ"
     assert ev.outcome == "ALLOW"
     assert ev.seq is not None
+
+
+def test_universal_uuid_strict_validation(db_session):
+    """
+    Regression test ensuring UniversalUUID strictly rejects non-UUID strings
+    on both SQLite and PostgreSQL.
+    """
+    from ayusetu.common.models import UniversalUUID
+    import uuid
+
+    # 1. Valid UUID object accepted
+    u_obj = uuid.UUID("018f0000-0000-7000-8000-000000000001")
+    p1 = Patient(id=u_obj, mrn="MRN-VALID-OBJ")
+    db_session.add(p1)
+    db_session.commit()
+    assert p1.id == u_obj
+
+    # 2. Valid UUID string accepted
+    u_str = "018f0000-0000-7000-8000-000000000002"
+    p2 = Patient(id=u_str, mrn="MRN-VALID-STR")
+    db_session.add(p2)
+    db_session.commit()
+    assert str(p2.id) == u_str
+
+    from sqlalchemy.exc import StatementError
+
+    # 3. Invalid arbitrary string rejected during DB bind/commit
+    with pytest.raises((ValueError, StatementError)) as exc_info:
+        p_invalid = Patient(id="station-opd-01", mrn="MRN-INVALID-STR")
+        db_session.add(p_invalid)
+        db_session.commit()
+    assert "badly formed hexadecimal UUID string" in str(exc_info.value)
+
+    db_session.rollback()
+
+    # 4. Invalid audit actor_id rejected during DB bind/commit
+    with pytest.raises((ValueError, StatementError)) as exc_info:
+        audit_invalid = AuditEvent(
+            actor_id="station-01",  # Invalid non-UUID
+            actor_role="device",
+            action="READ",
+            resource_type="Encounter",
+            resource_id="018f0000-0000-7000-8000-000000000001",
+            outcome="ALLOW",
+            payload_hash=b"fake",
+            prev_hash=b"fake",
+            entry_hash=b"fake",
+        )
+        db_session.add(audit_invalid)
+        db_session.commit()
+    assert "badly formed hexadecimal UUID string" in str(exc_info.value)
+
+    db_session.rollback()
+

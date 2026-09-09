@@ -60,14 +60,16 @@ class QuarantineStore:
 
         # Dispatch security event to M3 security hook
         try:
+            device_actor_uuid = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"ayusetu.device.{device_id}")) if device_id else "00000000-0000-0000-0000-000000000000"
             dispatch_security_event(
                 event_type="OFFLINE_AUDIT_QUARANTINED",
-                actor_id=device_id,
+                actor_id=device_actor_uuid,
                 actor_role="device",
                 target_resource="audit_chain",
                 reason=f"{failure_code}: {reason}",
                 metadata={
                     "quarantine_id": record.quarantine_id,
+                    "device_id": device_id,
                     "event_count": event_count,
                     "seed_head_hash": seed_head_hash,
                 },

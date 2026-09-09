@@ -10,6 +10,7 @@ Guarantees ZERO PHI, strictly monotonic sequencing, and offline batch splicing.
 from datetime import datetime, timezone
 import logging
 from typing import Any, Dict, List, Optional, Set
+import uuid
 
 from ayusetu.audit.models import (
     AuditAction,
@@ -74,6 +75,16 @@ def sanitize_audit_metadata(raw_metadata: Optional[Dict[str, Any]]) -> Dict[str,
     return sanitized
 
 
+def _to_valid_uuid_str(val: Optional[str], fallback_prefix: str = "system") -> str:
+    """Ensure a valid 36-character UUID string, using deterministic UUIDv5 for string identifiers."""
+    if not val:
+        return "00000000-0000-0000-0000-000000000000"
+    try:
+        return str(uuid.UUID(str(val)))
+    except (ValueError, AttributeError):
+        return str(uuid.uuid5(uuid.NAMESPACE_DNS, f"ayusetu.{fallback_prefix}.{val}"))
+
+
 class AuditService:
     """
     Production-ready audit service managing the global cryptographic audit chain.
@@ -103,15 +114,21 @@ class AuditService:
             action = AuditAction.READ
             outcome = AuditOutcome.DENY
 
+        actor_id = _to_valid_uuid_str(event.actor_id, "actor")
+        raw_res = event.target_encounter_id or event.target_patient_id
+        resource_id = _to_valid_uuid_str(raw_res, "resource")
+        patient_id = _to_valid_uuid_str(event.target_patient_id, "patient") if event.target_patient_id else None
+        encounter_id = _to_valid_uuid_str(event.target_encounter_id, "encounter") if event.target_encounter_id else None
+
         try:
             self.record_event(
-                actor_id=event.actor_id,
+                actor_id=actor_id,
                 actor_role=event.actor_role,
                 action=action,
                 resource_type=event.target_resource,
-                resource_id=event.target_encounter_id or event.target_patient_id or "00000000-0000-0000-0000-000000000000",
-                patient_id=event.target_patient_id,
-                encounter_id=event.target_encounter_id,
+                resource_id=resource_id,
+                patient_id=patient_id,
+                encounter_id=encounter_id,
                 outcome=outcome,
                 reason=f"{event.event_type}: {event.reason or ''}".strip(": "),
                 safe_metadata=sanitize_audit_metadata(event.metadata),
@@ -123,15 +140,16 @@ class AuditService:
     def _handle_consent_security_event(self, event: Dict[str, Any]) -> None:
         """Process DPDP consent security events dispatched by M4 Consent Service."""
         event_type = event.get("event_type", "CONSENT_EVENT")
-        actor_id = event.get("actor_id") or "00000000-0000-0000-0000-000000000000"
-        patient_id = event.get("patient_id")
-        encounter_id = event.get("encounter_id")
+        actor_id = _to_valid_uuid_str(event.get("actor_id"), "actor")
+        patient_id = _to_valid_uuid_str(event.get("patient_id"), "patient") if event.get("patient_id") else None
+        encounter_id = _to_valid_uuid_str(event.get("encounter_id"), "encounter") if event.get("encounter_id") else None
         timestamp = event.get("timestamp")
 
         action = AuditAction.CREATE
         outcome = AuditOutcome.ALLOW
         resource_type = "ConsentRecord"
-        resource_id = event.get("consent_id") or encounter_id or patient_id or "00000000-0000-0000-0000-000000000000"
+        raw_res = event.get("consent_id") or encounter_id or patient_id
+        resource_id = _to_valid_uuid_str(raw_res, "resource")
 
         if event_type == "CONSENT_WITHDRAWN":
             action = AuditAction.UPDATE
