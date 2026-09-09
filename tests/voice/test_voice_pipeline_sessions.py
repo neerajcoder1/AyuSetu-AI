@@ -127,5 +127,37 @@ class TestVoicePipelineSessionManagement(unittest.TestCase):
         with self.assertRaises(KeyError):
             pipeline.run(self.dummy_path, session_id="nonexistent")
 
+    def test_sessions_have_independent_engines(self):
+        pipeline = VoicePipeline()
+        sid1 = pipeline.create_session()
+        sid2 = pipeline.create_session()
+        sess1 = pipeline._session_manager.get_session(sid1)
+        sess2 = pipeline._session_manager.get_session(sid2)
+        self.assertIsNot(sess1.engine, sess2.engine)
+
+    def test_real_pipeline_session_memory_isolation(self):
+
+        from ayusetu.ai.voice.pipeline.voice_pipeline import SessionManager, ConversationSession
+        from ayusetu.ai.conversation.engine import DialogueEngine
+        from contracts.dialogue import ClinicalSlot
+
+        real_sm = SessionManager(DialogueEngine())
+        s1 = real_sm.create_session()
+        s2 = real_sm.create_session()
+
+        # Engine instances and memories must be completely distinct
+        self.assertIsNot(s1.engine, s2.engine)
+        self.assertIsNot(s1.engine.memory, s2.engine.memory)
+
+        # Mutate s1 memory via ASR turn
+        high_conf = ASROutput(text="I have stomach pain", language="en", confidence=0.95)
+        s1.engine.step(high_conf, s1.state)
+
+        # Verify s1 memory has chief complaint, s2 memory is completely empty
+        snap1 = s1.engine.memory.get_current_snapshot()
+        snap2 = s2.engine.memory.get_current_snapshot()
+        self.assertIn(ClinicalSlot.CHIEF_COMPLAINT, snap1.slots)
+        self.assertEqual(snap2.slots, {})
+
 if __name__ == "__main__":
     unittest.main()

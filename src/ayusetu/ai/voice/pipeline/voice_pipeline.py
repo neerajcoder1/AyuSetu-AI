@@ -28,9 +28,14 @@ class ConversationSession:
         Unique identifier generated via ``uuid4``.
     state: DialogueState
         The mutable state owned by ``DialogueEngine``.
+    engine: DialogueEngine
+        Session-scoped engine that owns this session's ``ClinicalMemory``.
+        Each session has its own engine instance so clinical data
+        can never leak between patients.
     """
     session_id: str
     state: DialogueState
+    engine: DialogueEngine
 
 
 class SessionManager:
@@ -41,21 +46,34 @@ class SessionManager:
     dict keyed by their UUID4 string.
     """
 
-    def __init__(self, dialogue_engine: DialogueEngine):
+    def __init__(self, dialogue_engine: Optional[DialogueEngine] = None):
         self._dialogue_engine = dialogue_engine
         self._sessions: Dict[str, ConversationSession] = {}
 
     def create_session(self) -> ConversationSession:
-        """Create a new session with a fresh ``DialogueState``.
+        """Create a new session with a fresh ``DialogueEngine`` and ``DialogueState``.
 
         Returns
         -------
         ConversationSession
-            The newly created session containing its ID and state.
+            The newly created session containing its ID, state, and engine.
         """
         session_id = str(uuid.uuid4())
-        state = self._dialogue_engine.initialize()
-        session = ConversationSession(session_id=session_id, state=state)
+        if self._dialogue_engine is not None:
+            try:
+                engine = type(self._dialogue_engine)(
+                    extractor=getattr(self._dialogue_engine, "extractor", None),
+                    llm_provider=getattr(getattr(self._dialogue_engine, "wording_llm", None), "provider", None),
+                    asr_confidence_threshold=getattr(getattr(self._dialogue_engine, "planner", None), "asr_confidence_threshold", 0.6),
+                    extraction_confidence_threshold=getattr(getattr(self._dialogue_engine, "planner", None), "extraction_confidence_threshold", 0.7),
+                )
+            except TypeError:
+                engine = type(self._dialogue_engine)()
+        else:
+            engine = DialogueEngine()
+
+        state = engine.initialize()
+        session = ConversationSession(session_id=session_id, state=state, engine=engine)
         self._sessions[session_id] = session
         return session
 
@@ -143,7 +161,9 @@ class VoicePipeline:
             # May raise KeyError if not found – this is the intended behavior
             session = self._session_manager.get_session(session_id)
             state = session.state
+            engine = session.engine
         else:
+            engine = self._dialogue_engine
             state = None  # will be created after ASR if needed
 
         # Import transcribe lazily so that test patches are effective
@@ -170,10 +190,10 @@ class VoicePipeline:
 
         # If we do not already have a state (i.e., no session supplied), create a temporary one
         if state is None:
-            state = self._dialogue_engine.initialize()
+            state = engine.initialize()
 
         # 2️⃣ Dialogue Engine – mutates the provided state.
-        response_text = self._dialogue_engine.step(asr_output, state)
+        response_text = engine.step(asr_output, state)
         result["response_text"] = response_text
 
         # 3️⃣ TTS synthesis
