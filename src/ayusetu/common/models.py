@@ -56,14 +56,21 @@ class UniversalUUID(TypeDecorator):
             return value
         if isinstance(value, uuid.UUID):
             return str(value) if dialect.name != "postgresql" else value
-        return uuid.UUID(str(value)) if dialect.name == "postgresql" else str(value)
+        try:
+            val_uuid = uuid.UUID(str(value))
+            return val_uuid if dialect.name == "postgresql" else str(val_uuid)
+        except (ValueError, AttributeError):
+            return str(value)
 
     def process_result_value(self, value, dialect):
         if value is None:
             return value
-        if not isinstance(value, uuid.UUID):
-            return uuid.UUID(value)
-        return value
+        if isinstance(value, uuid.UUID):
+            return value
+        try:
+            return uuid.UUID(str(value))
+        except (ValueError, AttributeError):
+            return str(value)
 
 
 # Cross-database JSONB / JSON type support

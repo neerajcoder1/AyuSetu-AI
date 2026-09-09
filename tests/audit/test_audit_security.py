@@ -167,11 +167,14 @@ def test_audit_verifier_detects_server_side_tampering():
             resource_id="018f0000-0000-7000-8000-000000000010",
         )
 
-    # Tamper with event 2 in the repository's internal list
+    # Tamper with event 2 in the persisted database table
     repo = audit_service._repo
-    original_ev2 = repo._events[1]
-    tampered_ev2 = original_ev2.model_copy(update={"outcome": "DENY"})
-    repo._events[1] = tampered_ev2
+    with repo._session_factory() as db:
+        from ayusetu.common.models import AuditEvent
+        ev2 = db.query(AuditEvent).filter(AuditEvent.seq == 2).first()
+        assert ev2 is not None
+        ev2.outcome = "DENY"
+        db.commit()
 
     # Run verification
     verif = audit_service.verify_global_chain()

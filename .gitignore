@@ -32,6 +32,9 @@ patient_audio/
 # OS artifacts
 .DS_Store
 Thumbs.db
+*.db
+*.sqlite
+*.sqlite3
 
 # Editor artifacts
 .vscode/settings.json
