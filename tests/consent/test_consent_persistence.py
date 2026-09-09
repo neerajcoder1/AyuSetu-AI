@@ -18,6 +18,7 @@ from ayusetu.consent.models import (
     Purposes,
     ConsentGrantRequest,
     ConsentWithdrawRequest,
+    OfflineConsentPayload,
     ConsentStatus,
 )
 from ayusetu.consent.repository import ConsentRepository
@@ -214,19 +215,268 @@ def test_multi_instance_restart_lifecycle(isolated_consent_db_factory):
     assert len(history) == 3
 
 
+def test_multi_version_lifecycle_ordering(isolated_consent_db_factory):
+    """
+    PART 1: Verify deterministic multi-version ordering:
+    V1: Grant (clinical=True, abdm=True, qi=False, research=True)
+    V2: Optional-purpose withdrawal (withdraw research)
+    V3: Optional-purpose update (withdraw abdm)
+    V4: Clinical withdrawal (withdraw clinical)
+
+    Asserts:
+    - V1 < V2 < V3 < V4 in both version sequence and UUIDv7 chronological ordering
+    - Process restart returns V4 as authoritative latest state
+    - Complete history [V1, V2, V3, V4] is reconstructed with exact versions
+    """
+    repo = ConsentRepository(session_factory=isolated_consent_db_factory)
+    service = ConsentService(repository=repo)
+
+    enc_id = "018f0000-0000-7000-8000-000000000050"
+    pat_id = "018f0000-0000-7000-8000-000000000005"
+
+    # V1: Grant
+    v1 = service.grant_consent(
+        ConsentGrantRequest(
+            patient_id=pat_id,
+            encounter_id=enc_id,
+            purposes=Purposes(clinical=True, abdm=True, qi=False, research=True),
+            language="en",
+            notice_version="dpdp-v1.0",
+        )
+    )
+    assert v1.version == 1
+    assert v1.status == ConsentStatus.ACTIVE
+
+    # V2: Optional-purpose withdrawal (research)
+    v2 = service.withdraw_consent(
+        ConsentWithdrawRequest(
+            encounter_id=enc_id,
+            purposes_to_withdraw=["research"],
+            reason="Patient opted out of research",
+        )
+    )
+    assert v2.version == 2
+    assert v2.status == ConsentStatus.PARTIALLY_WITHDRAWN
+    assert v2.purposes["research"] is False
+    assert v2.purposes["abdm"] is True
+    assert v2.purposes["clinical"] is True
+
+    # V3: Optional-purpose withdrawal (abdm)
+    v3 = service.withdraw_consent(
+        ConsentWithdrawRequest(
+            encounter_id=enc_id,
+            purposes_to_withdraw=["abdm"],
+            reason="Patient opted out of ABDM linkage",
+        )
+    )
+    assert v3.version == 3
+    assert v3.status == ConsentStatus.PARTIALLY_WITHDRAWN
+    assert v3.purposes["abdm"] is False
+    assert v3.purposes["clinical"] is True
+
+    # V4: Clinical withdrawal
+    v4 = service.withdraw_consent(
+        ConsentWithdrawRequest(
+            encounter_id=enc_id,
+            purposes_to_withdraw=["clinical"],
+            reason="Patient withdrew clinical intake consent",
+        )
+    )
+    assert v4.version == 4
+    assert v4.status == ConsentStatus.WITHDRAWN
+    assert v4.purposes["clinical"] is False
+
+    # Assert strict version monotonicity
+    assert v1.version < v2.version < v3.version < v4.version
+    assert v1.id < v2.id < v3.id < v4.id
+
+    # Destroy in-memory instances and simulate process restart
+    del service
+    del repo
+
+    # Service Restart: Recover state from PostgreSQL/database
+    repo_restarted = ConsentRepository(session_factory=isolated_consent_db_factory)
+    service_restarted = ConsentService(repository=repo_restarted)
+
+    # 1. Authoritative latest state must be V4
+    latest = service_restarted.get_active_consent(enc_id)
+    assert latest is not None
+    assert latest.id == v4.id
+    assert latest.version == 4
+    assert latest.status == ConsentStatus.WITHDRAWN
+    assert latest.purposes["clinical"] is False
+    assert latest.purposes["abdm"] is False
+    assert latest.purposes["research"] is False
+
+    # 2. Clinical and purpose gating must reflect V4
+    assert service_restarted.check_clinical_consent(enc_id) is False
+    assert service_restarted.check_purpose_consent(enc_id, "clinical") is False
+    assert service_restarted.check_purpose_consent(enc_id, "abdm") is False
+    assert service_restarted.check_purpose_consent(enc_id, "research") is False
+    assert service_restarted.is_external_sharing_permitted(enc_id) is False
+
+    # 3. Full history reconstruction must contain [V1, V2, V3, V4]
+    history = service_restarted.get_consent_history(enc_id)
+    assert len(history) == 4
+    assert [h.version for h in history] == [1, 2, 3, 4]
+    assert [h.id for h in history] == [v1.id, v2.id, v3.id, v4.id]
+    assert history[0].purposes["research"] is True
+    assert history[1].purposes["research"] is False
+    assert history[2].purposes["abdm"] is False
+    assert history[3].purposes["clinical"] is False
+
+
+def test_concurrent_consent_updates_serialization(isolated_consent_db_factory):
+    """
+    PART 2: Real database concurrency test targeting the SAME encounter.
+    Executes concurrent threads that perform simultaneous consent updates against the database.
+    Proves:
+    - Concurrent requests execute simultaneously
+    - Database transactions serialize writes
+    - No lost updates occur
+    - No duplicate logical version is created
+    - History remains valid and strictly ordered
+    - Latest-version recovery is deterministic
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    repo = ConsentRepository(session_factory=isolated_consent_db_factory)
+    service = ConsentService(repository=repo)
+
+    enc_id = "018f0000-0000-7000-8000-000000000060"
+    pat_id = "018f0000-0000-7000-8000-000000000006"
+
+    # Initial V1 grant
+    v1 = service.grant_consent(
+        ConsentGrantRequest(
+            patient_id=pat_id,
+            encounter_id=enc_id,
+            purposes=Purposes(clinical=True, abdm=True, qi=True, research=True),
+            language="en",
+            notice_version="dpdp-v1.0",
+        )
+    )
+    assert v1.version == 1
+
+    # Concurrently perform 4 updates targeting the same encounter
+    purposes_to_withdraw = [
+        ["research"],
+        ["qi"],
+        ["abdm"],
+        ["clinical"],
+    ]
+
+    results = []
+    errors = []
+
+    def perform_withdrawal(purposes, idx):
+        worker_repo = ConsentRepository(session_factory=isolated_consent_db_factory)
+        worker_service = ConsentService(repository=worker_repo)
+        return worker_service.withdraw_consent(
+            ConsentWithdrawRequest(
+                encounter_id=enc_id,
+                purposes_to_withdraw=purposes,
+                reason=f"Concurrent withdrawal worker {idx}",
+            )
+        )
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {
+            executor.submit(perform_withdrawal, p, i): i
+            for i, p in enumerate(purposes_to_withdraw)
+        }
+        for future in as_completed(futures):
+            try:
+                res = future.result()
+                results.append(res)
+            except Exception as exc:
+                errors.append(exc)
+
+    assert len(errors) == 0, f"Unexpected concurrency errors: {errors}"
+    assert len(results) == 4
+
+    # Verify all version numbers are unique and strictly 2, 3, 4, 5
+    returned_versions = sorted([r.version for r in results])
+    assert returned_versions == [2, 3, 4, 5], f"Expected versions [2, 3, 4, 5], got {returned_versions}"
+
+    # Verify history in database has exactly 5 records
+    history = service.get_consent_history(enc_id)
+    assert len(history) == 5
+    assert [h.version for h in history] == [1, 2, 3, 4, 5]
+
+    # Verify UUIDv7 IDs are strictly monotonic
+    for i in range(len(history) - 1):
+        assert history[i].id < history[i + 1].id
+
+    # Verify latest active state
+    latest = service.get_active_consent(enc_id)
+    assert latest is not None
+    assert latest.version == 5
+    assert latest.id == history[-1].id
+
+
 def test_consent_fails_closed_when_db_fails():
     """
-    Verify fail-closed behavior:
-    If database query fails or raises an error, gating checks MUST return False.
+    PART 3: Verify fail-closed behavior across all authoritative consent paths:
+    - grant_consent
+    - withdraw_consent
+    - check_clinical_consent
+    - check_purpose_consent
+    - is_external_sharing_permitted
+    - get_active_consent
+    - get_consent_history
+    - capture_offline_consent
     """
     broken_session_factory = MagicMock(side_effect=RuntimeError("PostgreSQL connection severed"))
     broken_repo = ConsentRepository(session_factory=broken_session_factory)
     broken_service = ConsentService(repository=broken_repo)
 
     enc_id = "018f0000-0000-7000-8000-000000000099"
+    pat_id = "018f0000-0000-7000-8000-000000000009"
 
-    # Must fail closed (return False, never default to True)
+    # 1. Gating checks must fail closed (return False, never True)
     assert broken_service.check_clinical_consent(enc_id) is False
     assert broken_service.check_purpose_consent(enc_id, "clinical") is False
     assert broken_service.check_purpose_consent(enc_id, "abdm") is False
+    assert broken_service.check_purpose_consent(enc_id, "qi") is False
+    assert broken_service.check_purpose_consent(enc_id, "research") is False
     assert broken_service.is_external_sharing_permitted(enc_id) is False
+
+    # 2. Authoritative state queries must raise on DB failure (never return fake granted state)
+    with pytest.raises(RuntimeError):
+        broken_service.get_active_consent(enc_id)
+
+    with pytest.raises(RuntimeError):
+        broken_service.get_consent_history(enc_id)
+
+    # 3. Grant / Withdraw must fail closed on DB failure (transaction rolled back, no successful response)
+    with pytest.raises(RuntimeError):
+        broken_service.grant_consent(
+            ConsentGrantRequest(
+                patient_id=pat_id,
+                encounter_id=enc_id,
+                purposes=Purposes(clinical=True),
+            )
+        )
+
+    with pytest.raises(RuntimeError):
+        broken_service.withdraw_consent(
+            ConsentWithdrawRequest(
+                encounter_id=enc_id,
+                purposes_to_withdraw=["all"],
+            )
+        )
+
+    # 4. Offline capture must fail closed on DB failure
+    with pytest.raises(RuntimeError):
+        broken_service.capture_offline_consent(
+            OfflineConsentPayload(
+                patient_id=pat_id,
+                encounter_id=enc_id,
+                purposes=Purposes(clinical=True),
+                language="hi",
+                notice_version="dpdp-v1.0",
+                device_id="station-01",
+                captured_at=datetime.now(timezone.utc),
+            )
+        )

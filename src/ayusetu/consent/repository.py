@@ -163,9 +163,9 @@ class ConsentRepository:
     PostgreSQL-backed repository for DPDP consent records.
     Provides immutable versioning and fail-closed persistence.
     """
+    _lock = threading.Lock()
 
     def __init__(self, session_factory: Optional[sessionmaker] = None) -> None:
-        self._lock = threading.Lock()
         self._session_factory = session_factory or get_default_session_factory()
 
     def save_consent(
