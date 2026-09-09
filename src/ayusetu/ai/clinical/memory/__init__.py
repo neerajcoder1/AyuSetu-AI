@@ -208,3 +208,33 @@ class ClinicalMemory:
         return (
             f"ClinicalMemory(slots={[s.value for s in self._slots]})"
         )
+
+
+# ---------------------------------------------------------------------------
+# Re-exports for longitudinal patient timeline (from contracts & timeline)
+# ---------------------------------------------------------------------------
+
+from ayusetu.ai.clinical.memory.contracts import (
+    EncounterSnapshot,
+    SourceKind,
+    TimelineEvent,
+    TimelineEventType,
+)
+from ayusetu.ai.clinical.memory.timeline import (
+    build_patient_timeline,
+    build_timeline_from_encounter,
+    filter_timeline,
+)
+
+__all__ = [
+    "ClinicalMemory",
+    "SlotEntry",
+    "ClinicalSnapshot",
+    "EncounterSnapshot",
+    "SourceKind",
+    "TimelineEvent",
+    "TimelineEventType",
+    "build_patient_timeline",
+    "build_timeline_from_encounter",
+    "filter_timeline",
+]

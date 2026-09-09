@@ -1,8 +1,8 @@
 import logging
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 def transcribe(audio_path: Path | str):
     """
@@ -15,6 +15,10 @@ def transcribe(audio_path: Path | str):
 
 from ayusetu.ai.conversation.engine import DialogueEngine, DialogueState
 from ayusetu.ai.voice.tts.chatterbox import ChatterboxTTS
+from ayusetu.ai.clinical.red_flags.engine import RedFlagEngine
+from ayusetu.ai.clinical.red_flags.contracts import RedFlagEvent
+from ayusetu.ai.clinical.document_ai.contracts import ExtractedEntity
+from ayusetu.ai.clinical.summary.contracts import ClinicalSummary
 
 # Session abstractions
 
@@ -32,10 +36,19 @@ class ConversationSession:
         Session-scoped engine that owns this session's ``ClinicalMemory``.
         Each session has its own engine instance so clinical data
         can never leak between patients.
+    document_entities: List[ExtractedEntity]
+        Session-scoped document entities extracted via Document AI.
+    red_flag_events: List[RedFlagEvent]
+        Session-scoped red flag events detected during conversation.
+    summary: Optional[ClinicalSummary]
+        Session-scoped clinical summary.
     """
     session_id: str
     state: DialogueState
     engine: DialogueEngine
+    document_entities: List[ExtractedEntity] = field(default_factory=list)
+    red_flag_events: List[RedFlagEvent] = field(default_factory=list)
+    summary: Optional[ClinicalSummary] = None
 
 
 class SessionManager:
@@ -110,6 +123,7 @@ class VoicePipeline:
     Public API:
         - create_session() -> str
         - get_state(session_id) -> DialogueState
+        - get_session(session_id) -> ConversationSession
         - end_session(session_id) -> None
         - run(audio_path, session_id=None) -> Dict[str, Any]
     """
@@ -118,6 +132,7 @@ class VoicePipeline:
         # Initialise reusable components once.
         self._dialogue_engine = DialogueEngine()
         self._tts_provider = ChatterboxTTS()
+        self._red_flag_engine = RedFlagEngine()
         # Use provided SessionManager or instantiate a default one.
         self._session_manager = session_manager or SessionManager(self._dialogue_engine)
 
@@ -132,6 +147,10 @@ class VoicePipeline:
     def get_state(self, session_id: str) -> DialogueState:
         """Retrieve the current DialogueState for a given session ID."""
         return self._session_manager.get_session(session_id).state
+
+    def get_session(self, session_id: str) -> ConversationSession:
+        """Retrieve the ConversationSession object for a given session ID."""
+        return self._session_manager.get_session(session_id)
 
     def end_session(self, session_id: str) -> None:
         """Discard the session identified by ``session_id``."""
@@ -157,6 +176,7 @@ class VoicePipeline:
             Result containing transcription, ASR confidence, response, etc.
         """
         # Validate session early if supplied
+        session: Optional[ConversationSession] = None
         if session_id is not None:
             # May raise KeyError if not found – this is the intended behavior
             session = self._session_manager.get_session(session_id)
@@ -179,6 +199,7 @@ class VoicePipeline:
             "response_sample_rate": None,
             "response_duration": None,
             "session_id": session_id,
+            "red_flags": [],
         }
 
         if low_conf:
@@ -195,6 +216,23 @@ class VoicePipeline:
         # 2️⃣ Dialogue Engine – mutates the provided state.
         response_text = engine.step(asr_output, state)
         result["response_text"] = response_text
+
+        # Evaluate RedFlags on current turn context
+        collected_info = state.get("collected_info", {}) if isinstance(state, dict) else getattr(state, "collected_info", {})
+        context = {slot.value if hasattr(slot, "value") else str(slot): str(val) for slot, val in collected_info.items()}
+        red_flags = self._red_flag_engine.evaluate(
+            encounter_id=session_id or "ephemeral",
+            context=context,
+            utterance=asr_output.text,
+        )
+        if session is not None and red_flags:
+            existing_ids = {rf.rule_id for rf in session.red_flag_events}
+            for rf in red_flags:
+                if rf.rule_id not in existing_ids:
+                    session.red_flag_events.append(rf)
+                    existing_ids.add(rf.rule_id)
+
+        result["red_flags"] = [rf.model_dump(mode="json") for rf in red_flags]
 
         # 3️⃣ TTS synthesis
         tts_result = self._tts_provider.synthesize(text=response_text, language=asr_output.language)
