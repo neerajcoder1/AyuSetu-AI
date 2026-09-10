@@ -63,7 +63,7 @@ class SessionManager:
         self._dialogue_engine = dialogue_engine
         self._sessions: Dict[str, ConversationSession] = {}
 
-    def create_session(self) -> ConversationSession:
+    def create_session(self, preferred_language: str = "hinglish") -> ConversationSession:
         """Create a new session with a fresh ``DialogueEngine`` and ``DialogueState``.
 
         Returns
@@ -86,6 +86,10 @@ class SessionManager:
             engine = DialogueEngine()
 
         state = engine.initialize()
+        if isinstance(state, dict):
+            state["preferred_language"] = preferred_language or "hinglish"
+        else:
+            setattr(state, "preferred_language", preferred_language or "hinglish")
         session = ConversationSession(session_id=session_id, state=state, engine=engine)
         self._sessions[session_id] = session
         return session
@@ -139,9 +143,9 @@ class VoicePipeline:
     # ---------------------------------------------------------------------
     # Session lifecycle helpers
     # ---------------------------------------------------------------------
-    def create_session(self) -> str:
+    def create_session(self, preferred_language: str = "hinglish") -> str:
         """Create a new conversation session and return its ID."""
-        session = self._session_manager.create_session()
+        session = self._session_manager.create_session(preferred_language=preferred_language)
         return session.session_id
 
     def get_state(self, session_id: str) -> DialogueState:
@@ -234,8 +238,11 @@ class VoicePipeline:
 
         result["red_flags"] = [rf.model_dump(mode="json") for rf in red_flags]
 
-        # 3️⃣ TTS synthesis
-        tts_result = self._tts_provider.synthesize(text=response_text, language=asr_output.language)
+        # 3️⃣ TTS synthesis in session preferred language if set, else detected language
+        target_lang = getattr(state, "preferred_language", None) or asr_output.language
+        if not target_lang or target_lang == "unknown":
+            target_lang = "hinglish"
+        tts_result = self._tts_provider.synthesize(text=response_text, language=target_lang)
         result.update(
             {
                 "response_audio": tts_result.audio,

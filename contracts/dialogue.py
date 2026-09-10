@@ -35,6 +35,7 @@ class DialogueState(BaseModel):
     history: List[DialogueTurn] = Field(default_factory=list)
     needs_clarification: bool = False
     is_complete: bool = False
+    preferred_language: str = "hinglish"
 
 class PlannerAction(BaseModel):
     next_slot: Optional[ClinicalSlot] = None

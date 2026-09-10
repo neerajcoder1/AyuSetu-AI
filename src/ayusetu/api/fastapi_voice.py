@@ -35,8 +35,15 @@ app.add_middleware(
 voice_pipeline = VoicePipeline()
 
 # ---------- Pydantic response & request models ----------
+class SessionCreateRequest(BaseModel):
+    preferred_language: Optional[str] = "hinglish"
+
 class SessionCreateResponse(BaseModel):
     session_id: str
+    preferred_language: Optional[str] = "hinglish"
+
+class LanguageUpdateRequest(BaseModel):
+    preferred_language: str
 
 class TurnResponse(BaseModel):
     transcribed_text: str
@@ -49,6 +56,7 @@ class TurnResponse(BaseModel):
     response_duration: Optional[float] = None
     session_id: Optional[str] = None
     red_flags: Optional[List[Dict[str, Any]]] = None
+    preferred_language: Optional[str] = None
 
 class DialogueStateResponse(BaseModel):
     state: DialogueState
@@ -100,9 +108,19 @@ def _wav_bytes_from_numpy(audio: Any, sample_rate: int) -> bytes:
 
 # ------------------- Endpoints -------------------
 @app.post("/sessions", response_model=SessionCreateResponse)
-def create_session():
-    session_id = voice_pipeline.create_session()
-    return SessionCreateResponse(session_id=session_id)
+def create_session(req: Optional[SessionCreateRequest] = None):
+    preferred_lang = req.preferred_language if req and req.preferred_language else "hinglish"
+    session_id = voice_pipeline.create_session(preferred_language=preferred_lang)
+    return SessionCreateResponse(session_id=session_id, preferred_language=preferred_lang)
+
+@app.patch("/sessions/{session_id}/language")
+def update_language(session_id: str, req: LanguageUpdateRequest):
+    try:
+        session = voice_pipeline.get_session(session_id)
+        session.state.preferred_language = req.preferred_language.lower()
+        return {"session_id": session_id, "preferred_language": session.state.preferred_language}
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Session not found")
 
 @app.post("/sessions/{session_id}/turn", response_model=TurnResponse)
 def turn(
@@ -152,6 +170,10 @@ def turn(
         wav_bytes = _wav_bytes_from_numpy(result["response_audio"], result["response_sample_rate"])
         audio_b64 = base64.b64encode(wav_bytes).decode("utf-8")
 
+    # Retrieve session state for preferred language
+    session_obj = voice_pipeline.get_session(session_id)
+    pref_lang = getattr(session_obj.state, "preferred_language", "hinglish")
+
     # Build response model
     return TurnResponse(
         transcribed_text=result["transcribed_text"],
@@ -164,6 +186,7 @@ def turn(
         response_duration=result.get("response_duration"),
         session_id=result.get("session_id"),
         red_flags=result.get("red_flags", []),
+        preferred_language=pref_lang,
     )
 
 @app.get(

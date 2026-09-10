@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Bot, User, Volume2, ArrowRight, MessageSquare, AlertCircle } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { Bot, User, Volume2, ArrowRight, MessageSquare, AlertCircle, Globe } from 'lucide-react';
 import AudioRecorder from '../components/AudioRecorder';
 import SlotChecklist from '../components/SlotChecklist';
 import { api } from '../services/api';
@@ -7,6 +7,8 @@ import { api } from '../services/api';
 export default function PatientInterviewScreen({
   sessionId,
   dialogueState,
+  preferredLanguage = 'hinglish',
+  onLanguageChange,
   onTurnCompleted,
   onGoToDoctorDashboard,
 }) {
@@ -15,6 +17,9 @@ export default function PatientInterviewScreen({
   const [lowConfidenceWarning, setLowConfidenceWarning] = useState(false);
   const [playingAudioIndex, setPlayingAudioIndex] = useState(null);
   const [error, setError] = useState(null);
+
+  const currentAudioRef = useRef(null);
+  const currentAudioUrlRef = useRef(null);
 
   const handleSendTurn = async (audioBlob) => {
     if (!sessionId) {
@@ -62,13 +67,56 @@ export default function PatientInterviewScreen({
 
   const handlePlayTTS = (audioB64, index) => {
     if (!audioB64) return;
+
+    // Stop and clean up any currently playing audio
+    if (currentAudioRef.current) {
+      currentAudioRef.current.pause();
+      currentAudioRef.current = null;
+    }
+    if (currentAudioUrlRef.current) {
+      URL.revokeObjectURL(currentAudioUrlRef.current);
+      currentAudioUrlRef.current = null;
+    }
+
     try {
-      const audio = new Audio(`data:audio/wav;base64,${audioB64}`);
+      // Decode base64 to binary byte array
+      const binaryString = window.atob(audioB64);
+      const len = binaryString.length;
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+
+      // Create Blob and Object URL for native browser media element playback
+      const blob = new Blob([bytes], { type: 'audio/wav' });
+      const blobUrl = URL.createObjectURL(blob);
+      currentAudioUrlRef.current = blobUrl;
+
+      const audio = new Audio(blobUrl);
+      currentAudioRef.current = audio;
+
       setPlayingAudioIndex(index);
-      audio.onended = () => setPlayingAudioIndex(null);
-      audio.play().catch((err) => {
-        console.error('Audio playback error:', err);
+
+      const cleanup = () => {
         setPlayingAudioIndex(null);
+        if (currentAudioUrlRef.current === blobUrl) {
+          URL.revokeObjectURL(blobUrl);
+          currentAudioUrlRef.current = null;
+        }
+        if (currentAudioRef.current === audio) {
+          currentAudioRef.current = null;
+        }
+      };
+
+      audio.onended = cleanup;
+      audio.onerror = (e) => {
+        console.error('Audio playback error:', e);
+        cleanup();
+      };
+
+      audio.play().catch((err) => {
+        console.error('Audio play() failed:', err);
+        cleanup();
       });
     } catch (e) {
       console.error('TTS error:', e);
@@ -99,6 +147,41 @@ export default function PatientInterviewScreen({
           <span>Open Doctor Dashboard</span>
           <ArrowRight className="w-4 h-4" />
         </button>
+      </div>
+
+      {/* Session Preferred Language Selection Bar */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+        <div className="flex items-center space-x-3">
+          <div className="p-2 bg-sky-100 text-sky-700 rounded-xl">
+            <Globe className="w-5 h-5" />
+          </div>
+          <div>
+            <h4 className="font-bold text-slate-900 text-xs sm:text-sm">Patient Preferred Language</h4>
+            <p className="text-[11px] text-slate-500">
+              Select your preferred response language for this intake session.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center space-x-1.5 bg-slate-100 p-1 rounded-xl border border-slate-200 shrink-0">
+          {[
+            { id: 'hi', label: 'Hindi (हिन्दी)' },
+            { id: 'hinglish', label: 'Hinglish' },
+            { id: 'en', label: 'English' },
+          ].map((lang) => (
+            <button
+              key={lang.id}
+              onClick={() => onLanguageChange && onLanguageChange(lang.id)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                preferredLanguage === lang.id
+                  ? 'bg-medical-600 text-white shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+              }`}
+            >
+              {lang.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {error && (

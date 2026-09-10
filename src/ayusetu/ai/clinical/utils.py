@@ -154,29 +154,47 @@ def parse_onset(text: str) -> Optional[Tuple[str, float]]:
 
     Returns (canonical_label, confidence) or None.
     """
+    # 1. Specific onset keywords (e.g. kal/yesterday, parson, last night, etc.)
     patterns = [
-        # Yesterday variants
+        (re.compile(r"\b(last night|kal raat|कल रात)\b", re.I | re.U), "last night", 0.90),
+        (re.compile(r"\b(parson|parso|परसों|day before yesterday)\b", re.I | re.U), "2 days ago", 0.90),
         (re.compile(r"\b(yesterday|kal|कल)\b", re.I | re.U), "yesterday", 0.90),
-        # This morning / aaj subah
-        (re.compile(r"\b(this morning|aaj subah|aaj savere|आज सुबह)\b", re.I | re.U),
-         "this morning", 0.90),
-        # Today
+        (re.compile(r"\b(this morning|aaj subah|aaj savere|आज सुबह)\b", re.I | re.U), "this morning", 0.90),
         (re.compile(r"\b(today|aaj|आज)\b", re.I | re.U), "today", 0.85),
-        # Last week
-        (re.compile(r"\b(last week|pichle hafte|पिछले हफ्ते)\b", re.I | re.U),
-         "last week", 0.88),
-        # Sudden onset
-        (re.compile(
-            r"\b(suddenly|achanak|अचानक|out of nowhere)\b",
-            re.I | re.U), "sudden onset", 0.85),
-        # Gradual onset
-        (re.compile(
-            r"\b(gradually|धीरे[-\s]?धीरे|dheere dheere|slowly|over time)\b",
-            re.I | re.U), "gradual onset", 0.82),
+        (re.compile(r"\b(last week|pichle hafte|पिछले हफ्ते)\b", re.I | re.U), "last week", 0.88),
+        (re.compile(r"\b(last month|pichle mahine|पिछले महीने)\b", re.I | re.U), "last month", 0.88),
+        (re.compile(r"\b(suddenly|achanak|अचानक|out of nowhere)\b", re.I | re.U), "sudden onset", 0.85),
+        (re.compile(r"\b(gradually|धीरे[-\s]?धीरे|dheere dheere|slowly|over time)\b", re.I | re.U), "gradual onset", 0.82),
     ]
     for pattern, label, conf in patterns:
         if pattern.search(text):
             return label, conf
+
+    # 2. Relative onset with duration + ago/pehle (e.g. "3 days ago", "teen din pehle", "तीन दिन पहले")
+    num_keys = "|".join(re.escape(k) for k in _NUMBER_WORDS.keys())
+    rel_ago_pattern = re.compile(
+        r"\b(?:(\d+|" + num_keys + r")\s+)?"
+        r"(घंटे?|ghante?|hours?|दिन|din|days?|हफ्ते?|हफ़्ते?|hafte?|weeks?|महीने?|mahine?|months?|साल|saal|years?)\s*"
+        r"(?:पहले|pahle|pehle|ago)\b",
+        re.I | re.U,
+    )
+    m_ago = rel_ago_pattern.search(text)
+    if m_ago:
+        return m_ago.group(0), 0.90
+
+    # 3. Verb phrases with start/shuru (e.g. "shuru hui", "shuru hua", "started", "pehli baar")
+    start_pattern = re.compile(
+        r"\b(shuru\s*(?:hui|hua|huye|ho\s*gaya)?|शुरू\s*(?:हुआ|हुई|हो\s*गया)?|started?|first\s*started|pehli\s*baar|पहली\s*बार)\b",
+        re.I | re.U,
+    )
+    if start_pattern.search(text):
+        dur = parse_duration(text)
+        if dur:
+            return f"{dur[0]} ago", 0.88
+        m_start = start_pattern.search(text)
+        if m_start:
+            return text.strip()[:60], 0.82
+
     return None
 
 

@@ -81,7 +81,9 @@ class DialogueEngine:
         action = self.planner.plan_next_action(asr_output, state, extraction_result)
 
         # 3. Wording Layer translates intent to natural language
-        target_lang = asr_output.language if asr_output.language != "unknown" else "hinglish"
+        target_lang = getattr(state, "preferred_language", None) or asr_output.language
+        if not target_lang or target_lang == "unknown":
+            target_lang = "hinglish"
         response_text = self.wording_llm.generate_wording(action, target_lang)
 
         # 4. Append AI response to history
