@@ -57,6 +57,19 @@ SAFE_METADATA_WHITELIST: Set[str] = {
     "quarantine_id",
     "seed_head_hash",
     "head_hash",
+    "export_id",
+    "purpose",
+    "cohort_size",
+    "candidate_count",
+    "min_class_size",
+    "k_threshold",
+    "k_anonymity_achieved",
+    "violations_count",
+    "date_from",
+    "date_to",
+    "approver_1",
+    "approver_2",
+    "department",
 }
 
 
@@ -89,6 +102,7 @@ class AuditService:
     """
     Production-ready audit service managing the global cryptographic audit chain.
     """
+    _HOOKS_REGISTERED: bool = False
 
     def __init__(self, repository: Optional[AuditRepository] = None) -> None:
         self._repo = repository or AuditRepository()
@@ -96,8 +110,10 @@ class AuditService:
 
     def _register_subsystem_hooks(self) -> None:
         """Register listeners with M3 Security and M4 Consent event dispatchers."""
-        register_security_event_listener(self._handle_gateway_security_event)
-        register_consent_event_listener(self._handle_consent_security_event)
+        if not AuditService._HOOKS_REGISTERED:
+            register_security_event_listener(self._handle_gateway_security_event)
+            register_consent_event_listener(self._handle_consent_security_event)
+            AuditService._HOOKS_REGISTERED = True
 
     def _handle_gateway_security_event(self, event: SecurityEvent) -> None:
         """Process security events dispatched by Gateway M3 (IDOR, Break-glass, Auth failures)."""
@@ -202,13 +218,13 @@ class AuditService:
         """
         sanitized_meta = sanitize_audit_metadata(safe_metadata)
         event_create = AuditEventCreate(
-            actor_id=str(actor_id),
+            actor_id=_to_valid_uuid_str(actor_id, "actor"),
             actor_role=actor_role,
             action=action,
             resource_type=resource_type,
-            resource_id=str(resource_id),
-            patient_id=str(patient_id) if patient_id else None,
-            encounter_id=str(encounter_id) if encounter_id else None,
+            resource_id=_to_valid_uuid_str(resource_id, "resource"),
+            patient_id=_to_valid_uuid_str(patient_id, "patient") if patient_id else None,
+            encounter_id=_to_valid_uuid_str(encounter_id, "encounter") if encounter_id else None,
             outcome=outcome,
             reason=reason,
             src_device=src_device,
