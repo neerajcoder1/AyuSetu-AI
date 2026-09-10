@@ -280,3 +280,26 @@ class AuditEvent(Base):
         Index("idx_audit_ts", "ts"),
         Index("idx_audit_encounter", "encounter_id"),
     )
+
+
+class QuarantinedAuditBatch(Base):
+    """
+    Durable PostgreSQL isolation store for invalid, tampered, or replayed offline audit chains.
+    Survives process restart with zero PHI retention.
+    """
+    __tablename__ = "quarantined_audit_batch"
+
+    id = Column(UniversalUUID, primary_key=True, default=generate_uuid7)
+    device_id = Column(String, nullable=False)
+    seed_head_hash = Column(String, nullable=False)
+    reason = Column(String, nullable=False)
+    failure_code = Column(String, nullable=False)
+    quarantined_at = Column(DateTime(timezone=True), default=utc_now, nullable=False)
+    event_count = Column(Integer, nullable=False, default=0)
+    safe_metadata = Column(UniversalJSONB, nullable=False, default=dict)
+
+    __table_args__ = (
+        Index("idx_quarantine_device", "device_id"),
+        Index("idx_quarantine_ts", "quarantined_at"),
+    )
+

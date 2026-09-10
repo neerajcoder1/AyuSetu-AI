@@ -16,10 +16,14 @@ from starlette.status import (
     HTTP_401_UNAUTHORIZED,
     HTTP_403_FORBIDDEN,
     HTTP_404_NOT_FOUND,
-    HTTP_422_UNPROCESSABLE_ENTITY,
     HTTP_500_INTERNAL_SERVER_ERROR,
     HTTP_503_SERVICE_UNAVAILABLE,
 )
+try:
+    from starlette.status import HTTP_422_UNPROCESSABLE_CONTENT as HTTP_STATUS_422
+except ImportError:
+    from starlette.status import HTTP_422_UNPROCESSABLE_ENTITY as HTTP_STATUS_422
+
 
 from ayusetu.gateway.errors import ErrorCode, AyuSetuGatewayError
 
@@ -72,7 +76,7 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException) 
         code = ErrorCode.POLICY_DENIED.value
     elif status_code == HTTP_404_NOT_FOUND:
         code = ErrorCode.NOT_FOUND.value
-    elif status_code == HTTP_422_UNPROCESSABLE_ENTITY:
+    elif status_code == HTTP_STATUS_422:
         code = ErrorCode.UNPROCESSABLE_ENTITY.value
     elif status_code == HTTP_503_SERVICE_UNAVAILABLE:
         code = ErrorCode.SERVICE_UNAVAILABLE.value
@@ -100,12 +104,13 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         })
 
     return build_error_response(
-        status_code=HTTP_422_UNPROCESSABLE_ENTITY,
+        status_code=HTTP_STATUS_422,
         code=ErrorCode.UNPROCESSABLE_ENTITY.value,
         message="Request validation failed. Please check payload schema.",
         request_id=req_id,
         details=sanitized_errors,
     )
+
 
 
 async def generic_exception_handler(request: Request, exc: Exception) -> JSONResponse:

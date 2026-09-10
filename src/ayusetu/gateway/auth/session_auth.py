@@ -6,10 +6,12 @@ and enforces 30-minute session TTL and revocation per PRD v2.0 §21.3 & §21.6.
 """
 
 from typing import Any, Dict, Optional, Set
+from ayusetu.common.config import settings
 from ayusetu.common.session_cache import SessionCache, TOKEN_PREFIX
 from ayusetu.gateway.auth.models import Principal, Role
 from ayusetu.gateway.auth.device import DeviceAuthenticator
 from ayusetu.gateway.errors import ErrorCode, AyuSetuGatewayError
+
 
 # ==============================================================================
 # Development-Only Staff Identity Adapter
@@ -96,19 +98,26 @@ class SessionAuthenticator:
         if auth_header and auth_header.startswith("Bearer "):
             token = auth_header[7:].strip()
             
-            # Development-only staff identity adapter. Production deployment MUST replace
-            # this adapter with validation of Hospital OIDC/SSO-issued credentials.
-            # Only accepts staff-token-{username} format for dev/demo authentication.
-            for username, staff_data in STAFF_DIRECTORY.items():
-                if token == f"staff-token-{username}":
-                    return Principal(
-                        actor_id=staff_data["actor_id"],
-                        role=staff_data["role"],
-                        department=staff_data.get("department"),
-                        assigned_encounter_ids=set(staff_data.get("assigned_encounters", set())),
-                        device_fingerprint=device_fingerprint,
-                        session_token=token,
-                        is_authenticated=True,
+            # Development-only staff identity adapter.
+            # In production, this dev adapter is disabled and strictly fails closed.
+            if settings.AYUSETU_ENV != "prod":
+                for username, staff_data in STAFF_DIRECTORY.items():
+                    if token == f"staff-token-{username}":
+                        return Principal(
+                            actor_id=staff_data["actor_id"],
+                            role=staff_data["role"],
+                            department=staff_data.get("department"),
+                            assigned_encounter_ids=set(staff_data.get("assigned_encounters", set())),
+                            device_fingerprint=device_fingerprint,
+                            session_token=token,
+                            is_authenticated=True,
+                        )
+            else:
+                if token.startswith("staff-token-"):
+                    raise AyuSetuGatewayError(
+                        ErrorCode.POLICY_DENIED,
+                        "Development staff tokens are forbidden in production environment. Hospital SSO/OIDC required.",
+                        403,
                     )
 
             # Check if token is a Redis 256-bit session token
@@ -123,6 +132,7 @@ class SessionAuthenticator:
                 "Authentication credentials invalid or expired",
                 401
             )
+
 
         # 3. Check Session ID Header / Kiosk session lookup
         if session_id_header:

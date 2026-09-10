@@ -5,8 +5,9 @@ Authoritative environment configuration per PRD v2.0 §22.9.
 """
 
 from typing import Optional
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
 
 
 class Settings(BaseSettings):
@@ -96,6 +97,19 @@ class Settings(BaseSettings):
         extra="ignore"
     )
 
+    @model_validator(mode="after")
+    def validate_production_security(self) -> "Settings":
+
+        """Enforce strict fail-closed security requirements in production environment."""
+        if self.AYUSETU_ENV == "prod":
+            if self.DEBUG:
+                raise ValueError("DEBUG mode must be False in production (AYUSETU_ENV=prod)")
+            if "ayusetu_dev_secret" in self.DATABASE_URL:
+                raise ValueError("Default development database password 'ayusetu_dev_secret' is forbidden in production")
+            if any("*" in origin for origin in self.CORS_ALLOWED_ORIGINS):
+                raise ValueError("Wildcard CORS origins are forbidden in production")
+        return self
+
     @property
     def async_db_url(self) -> str:
         if self.ASYNC_DATABASE_URL:
@@ -110,3 +124,4 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+

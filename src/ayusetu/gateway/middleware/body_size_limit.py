@@ -7,7 +7,10 @@ Enforces request size boundaries per PRD v2.0 §21.6 (25 MB uploads, 256 KB othe
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
-from starlette.status import HTTP_413_REQUEST_ENTITY_TOO_LARGE
+try:
+    from starlette.status import HTTP_413_CONTENT_TOO_LARGE as HTTP_STATUS_413
+except ImportError:
+    from starlette.status import HTTP_413_REQUEST_ENTITY_TOO_LARGE as HTTP_STATUS_413
 
 from ayusetu.common.config import settings
 from ayusetu.gateway.errors import ErrorCode
@@ -35,7 +38,7 @@ class BodySizeLimitMiddleware(BaseHTTPMiddleware):
                 if length > max_bytes:
                     req_id = getattr(request.state, "request_id", "")
                     return JSONResponse(
-                        status_code=HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        status_code=HTTP_STATUS_413,
                         content={
                             "error": {
                                 "code": ErrorCode.PAYLOAD_TOO_LARGE.value,
@@ -46,6 +49,7 @@ class BodySizeLimitMiddleware(BaseHTTPMiddleware):
                         },
                         headers={"X-Request-ID": req_id} if req_id else None
                     )
+
             except ValueError:
                 pass
 

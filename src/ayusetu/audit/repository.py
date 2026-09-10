@@ -113,6 +113,32 @@ def bytes_to_hash(b: Any) -> str:
     return str(b)
 
 
+def _verify_row_integrity(row: AuditEvent) -> bool:
+    """Recompute entry hash for a stored row and verify mathematical consistency."""
+    if row is None:
+        return True
+    ts_str = format_utc_iso(row.ts)
+    computed_hash = compute_entry_hash(
+        seq=int(row.seq),
+        ts=ts_str,
+        actor_id=str(row.actor_id),
+        actor_role=row.actor_role,
+        action=row.action,
+        resource_type=row.resource_type,
+        resource_id=str(row.resource_id),
+        outcome=row.outcome,
+        payload_hash=bytes_to_hash(row.payload_hash),
+        prev_hash=bytes_to_hash(row.prev_hash),
+        patient_id=str(row.patient_id) if row.patient_id else None,
+        encounter_id=str(row.encounter_id) if row.encounter_id else None,
+        reason=row.reason,
+        src_device=row.src_device,
+        src_ip=row.src_ip,
+    )
+    stored_hash = bytes_to_hash(row.entry_hash)
+    return computed_hash == stored_hash
+
+
 def _row_to_dto(row: AuditEvent) -> AuditEventDTO:
     """Map SQLAlchemy AuditEvent row to immutable Pydantic AuditEventDTO."""
     ts_str = format_utc_iso(row.ts)
@@ -174,6 +200,12 @@ class AuditRepository:
                     # 1. Fetch latest persisted event in chain
                     latest = db.query(AuditEvent).order_by(AuditEvent.seq.desc()).first()
                     if latest is not None:
+                        if not _verify_row_integrity(latest):
+                            logger.critical(
+                                "CRITICAL SECURITY ALERT [AUDIT_HEAD_TAMPERED]: Seq %d stored entry_hash is invalid. Halting append.",
+                                latest.seq,
+                            )
+                            raise RuntimeError(f"Audit chain head seq={latest.seq} integrity compromised. Append rejected.")
                         next_seq = int(latest.seq) + 1
                         prev_hash = bytes_to_hash(latest.entry_hash)
                     else:
@@ -242,6 +274,12 @@ class AuditRepository:
         with self._session_factory() as db:
             latest = db.query(AuditEvent).order_by(AuditEvent.seq.desc()).first()
             if latest is not None:
+                if not _verify_row_integrity(latest):
+                    logger.critical(
+                        "CRITICAL SECURITY ALERT [AUDIT_HEAD_TAMPERED]: Seq %d stored entry_hash is invalid.",
+                        latest.seq,
+                    )
+                    raise RuntimeError(f"Audit chain head seq={latest.seq} integrity compromised.")
                 ts_str = latest.ts.isoformat() if isinstance(latest.ts, datetime) else str(latest.ts)
                 return AuditHeadDTO(
                     seq=int(latest.seq),
@@ -253,6 +291,7 @@ class AuditRepository:
                 entry_hash=GENESIS_HASH,
                 ts=datetime.now(timezone.utc).isoformat(),
             )
+
 
     def get_by_seq(self, seq: int) -> Optional[AuditEventDTO]:
         """Look up single audit record by sequence number from PostgreSQL."""
