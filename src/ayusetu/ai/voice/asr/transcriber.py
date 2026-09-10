@@ -200,15 +200,16 @@ def transcribe(
 
     heuristic_lang = infer_language_from_text(raw.text)
 
-    if heuristic_lang == "hinglish":
-        # Mixed script detected — this is the key Hinglish case.
-        # Trust the text composition over the model's language token.
-        language = "hinglish"
-        if raw.detected_language and raw.detected_language != "hinglish":
+    if heuristic_lang in {"hinglish", "hi"}:
+        # Confident text-based language (hi / hinglish) takes precedence over
+        # model-level language tokens (e.g. Whisper reporting "en" due to ASCII digits).
+        language = heuristic_lang
+        if raw.detected_language and raw.detected_language != heuristic_lang:
             logger.debug(
-                "Mixed-script text detected despite model reporting language='%s'. "
-                "Using 'hinglish'.",
+                "Text heuristic detected '%s' despite model reporting language='%s'. Using '%s'.",
+                heuristic_lang,
                 raw.detected_language,
+                heuristic_lang,
             )
     elif raw.detected_language in {"hi", "en"}:
         # Model reported a clean language and text confirms it.

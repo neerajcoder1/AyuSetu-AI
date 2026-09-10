@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, List
 import soundfile as sf
 import imageio_ffmpeg
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, HTTPException, UploadFile, File, Depends, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -17,8 +18,18 @@ from ayusetu.ai.clinical.document_ai.entity_extractor import extract_entities
 from ayusetu.ai.clinical.summary.composer import SummaryGenerator
 from ayusetu.ai.clinical.summary.contracts import ClinicalSummary, RejectionReason, SummaryEdit, SummaryRejection
 from ayusetu.ai.clinical.summary import physician_review
+from ayusetu.ai.clinical.memory.contracts import EncounterSnapshot, TimelineEvent
+from ayusetu.ai.clinical.memory.timeline import build_timeline_from_encounter
 
 app = FastAPI(title="AyuSetu Voice API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Single shared pipeline instance (in‑memory session manager)
 voice_pipeline = VoicePipeline()
@@ -288,3 +299,27 @@ def reject_summary_endpoint(session_id: str, req: RejectRequest):
     return {
         "rejection": rejection_record.model_dump(mode="json"),
     }
+
+# ------------------- Patient Timeline Endpoint -------------------
+@app.get("/sessions/{session_id}/timeline", response_model=List[TimelineEvent])
+def get_timeline(session_id: str) -> List[TimelineEvent]:
+    try:
+        session = voice_pipeline.get_session(session_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    red_flag_titles = [
+        rf.trigger_text if hasattr(rf, "trigger_text") else str(rf)
+        for rf in session.red_flag_events
+    ]
+
+    snapshot = EncounterSnapshot(
+        encounter_id=session_id,
+        collected_info=session.state.collected_info,
+        missing_slots=session.state.missing_slots,
+        document_entities=session.document_entities,
+        red_flag_titles=red_flag_titles,
+    )
+    events = build_timeline_from_encounter(snapshot)
+    return events
+

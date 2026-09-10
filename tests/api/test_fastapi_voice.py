@@ -33,6 +33,19 @@ class DummyPipeline:
             raise KeyError
         del self._sessions[session_id]
 
+    def get_session(self, session_id: str):
+        if session_id not in self._sessions:
+            raise KeyError
+        class MockSession:
+            def __init__(self, s_id):
+                self.session_id = s_id
+                from contracts.dialogue import DialogueState
+                self.state = DialogueState()
+                self.red_flag_events = []
+                self.document_entities = []
+                self.summary = None
+        return MockSession(session_id)
+
     def run(self, audio_path: str, session_id: str = None):
         # Return a deterministic result regardless of input audio
         return {
@@ -138,3 +151,23 @@ def test_low_confidence_turn(monkeypatch):
     assert data["low_confidence"] is True
     assert data["response_audio"] is None
     assert data["response_text"] is None
+
+def test_cors_headers():
+    response = client.options("/sessions", headers={"Origin": "http://localhost:5173", "Access-Control-Request-Method": "POST"})
+    assert response.status_code == 200
+    assert response.headers.get("access-control-allow-origin") in ["*", "http://localhost:5173"]
+
+def test_get_timeline():
+    # Re-create session
+    client.post("/sessions")
+    response = client.get("/sessions/dummy-session-id/timeline")
+    assert response.status_code == 200
+    events = response.json()
+    assert isinstance(events, list)
+    assert len(events) > 0
+    assert events[0]["event_type"] == "encounter"
+
+def test_get_timeline_not_found():
+    response = client.get("/sessions/nonexistent-session/timeline")
+    assert response.status_code == 404
+

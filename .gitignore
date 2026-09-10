@@ -13,7 +13,7 @@ models/
 # Evaluation outputs — generated, not source
 eval/results/
 
-# Python artifacts
+# Python & Node artifacts
 __pycache__/
 *.pyc
 *.pyo
@@ -23,6 +23,7 @@ htmlcov/
 dist/
 build/
 *.egg-info/
+node_modules/
 
 # Patient audio recordings — NEVER commit real patient data
 recordings/
