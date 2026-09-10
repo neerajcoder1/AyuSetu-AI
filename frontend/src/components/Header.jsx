@@ -1,5 +1,5 @@
 import React from 'react';
-import { Activity, Stethoscope, User, RefreshCw, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Activity, Stethoscope, User, RefreshCw, AlertCircle, CheckCircle2, Globe } from 'lucide-react';
 
 export default function Header({
   activeTab,
@@ -8,6 +8,8 @@ export default function Header({
   onNewSession,
   isConnected,
   isCreatingSession,
+  preferredLanguage = 'hinglish',
+  onLanguageChange,
 }) {
   return (
     <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
@@ -56,8 +58,23 @@ export default function Header({
             </button>
           </div>
 
-          {/* Session Info & Backend Connectivity */}
+          {/* Session Info & Preferred Language & Connectivity */}
           <div className="flex items-center space-x-3">
+            {/* Preferred Language Selector Pill */}
+            <div className="flex items-center space-x-1.5 bg-slate-100 border border-slate-200 rounded-lg px-2.5 py-1 text-xs">
+              <Globe className="w-3.5 h-3.5 text-medical-600 shrink-0" />
+              <span className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider hidden sm:inline">AI Lang:</span>
+              <select
+                value={preferredLanguage}
+                onChange={(e) => onLanguageChange && onLanguageChange(e.target.value)}
+                className="bg-transparent font-bold text-slate-800 text-xs focus:outline-none cursor-pointer"
+              >
+                <option value="hi">Hindi (हिन्दी)</option>
+                <option value="hinglish">Hinglish</option>
+                <option value="en">English</option>
+              </select>
+            </div>
+
             {/* Status indicator */}
             <div className="hidden md:flex items-center space-x-1.5 px-2 py-1 rounded-md bg-slate-50 border border-slate-200 text-xs font-medium">
               {isConnected ? (
@@ -83,7 +100,7 @@ export default function Header({
                   </span>
                 </div>
                 <button
-                  onClick={onNewSession}
+                  onClick={() => onNewSession && onNewSession(preferredLanguage)}
                   disabled={isCreatingSession}
                   title="Create New Session"
                   className="p-1 rounded-md text-sky-700 hover:bg-sky-100 transition-colors disabled:opacity-50"
@@ -93,7 +110,7 @@ export default function Header({
               </div>
             ) : (
               <button
-                onClick={onNewSession}
+                onClick={() => onNewSession && onNewSession(preferredLanguage)}
                 disabled={isCreatingSession}
                 className="bg-medical-600 hover:bg-medical-700 text-white font-medium text-xs px-3 py-1.5 rounded-lg shadow-sm transition-all"
               >

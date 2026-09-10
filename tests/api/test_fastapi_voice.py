@@ -16,10 +16,15 @@ class DummyPipeline:
     def __init__(self):
         self._sessions = {}
 
-    def create_session(self) -> str:
+    def create_session(self, preferred_language: str = "hinglish") -> str:
         session_id = "dummy-session-id"
-        self._sessions[session_id] = {}
+        self._sessions[session_id] = {"preferred_language": preferred_language}
         return session_id
+
+    def update_session_language(self, session_id: str, preferred_language: str):
+        if session_id not in self._sessions:
+            raise KeyError
+        self._sessions[session_id]["preferred_language"] = preferred_language
 
     def get_state(self, session_id: str):
         if session_id not in self._sessions:

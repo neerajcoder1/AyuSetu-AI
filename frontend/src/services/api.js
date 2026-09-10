@@ -21,10 +21,21 @@ async function handleResponse(response) {
 
 export const api = {
   // Create session
-  async createSession() {
+  async createSession(preferredLanguage = 'hinglish') {
     const res = await fetch(`${API_BASE_URL}/sessions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ preferred_language: preferredLanguage }),
+    });
+    return handleResponse(res);
+  },
+
+  // Update session preferred language
+  async updateSessionLanguage(sessionId, preferredLanguage) {
+    const res = await fetch(`${API_BASE_URL}/sessions/${sessionId}/language`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ preferred_language: preferredLanguage }),
     });
     return handleResponse(res);
   },
