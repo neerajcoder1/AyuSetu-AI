@@ -32,12 +32,27 @@ Important caveats
 
 import logging
 import math
+import re
 import unicodedata
 from typing import Optional
 
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
+# Curated Romanized Hinglish vocabulary sets for fallback detection
+_HINGLISH_STRONG_MARKERS = {
+    "mera", "meri", "mere", "mujhe", "mujhko", "naam", "bukhar", "pet",
+    "dard", "takleef", "bataiye", "batayein", "kya", "kahan", "kab",
+    "kaise", "kaisa", "raha", "rahi", "rahe", "thik", "theek", "dawa",
+    "dawai", "goli", "ulti", "ultee", "chakkar", "chhati", "gala",
+    "khansi", "nahin", "nhi", "aaya", "aayi", "aaye", "gaya", "gayi", "gaye",
+}
+
+_HINGLISH_GRAMMAR_MARKERS = {
+    "hai", "hain", "ho", "se", "mein", "me", "ko", "par", "ne",
+    "ka", "ki", "ke", "aur", "ya", "toh", "bhi",
+}
 
 # ─── Sigmoid mapping parameters ───────────────────────────────────────────────
 # Whisper avg_logprob typically ranges from ~-0.2 (excellent) to ~-1.5 (poor).
@@ -224,6 +239,13 @@ def infer_language_from_text(text: str) -> str:
     if devanagari_ratio >= 0.85:
         return "hi"
     elif devanagari_ratio <= 0.15:
+        # Check for Romanized Hinglish markers in Latin text before defaulting to "en"
+        words = re.findall(r"\b[a-z]+\b", text.lower())
+        strong_hits = sum(1 for w in words if w in _HINGLISH_STRONG_MARKERS)
+        grammar_hits = sum(1 for w in words if w in _HINGLISH_GRAMMAR_MARKERS)
+        score = (strong_hits * 2) + grammar_hits
+        if score >= 3 and (strong_hits >= 1 or grammar_hits >= 2):
+            return "hinglish"
         return "en"
     else:
         return "hinglish"

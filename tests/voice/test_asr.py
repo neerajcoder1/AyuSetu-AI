@@ -327,25 +327,25 @@ class TestConfidence:
 
 class TestLanguageInference:
 
-    def test_pure_hindi_devanagari(self):
-        result = infer_language_from_text("मुझे दो दिन से पेट में दर्द है")
-        assert result == "hi", f"Expected 'hi', got '{result}'"
+    def test_romanized_hinglish_name_and_pain(self):
+        result = infer_language_from_text("Hi, mera naam Nirvash hai, mujhe 3 din se pet mein dard hai")
+        assert result == "hinglish", f"Expected 'hinglish', got '{result}'"
 
-    def test_pure_english_latin(self):
-        result = infer_language_from_text("I have had a fever for two days")
+    def test_romanized_hinglish_fever_and_pain(self):
+        result = infer_language_from_text("mujhe bukhar hai aur pet mein dard hai")
+        assert result == "hinglish", f"Expected 'hinglish', got '{result}'"
+
+    def test_pure_english_three_days(self):
+        result = infer_language_from_text("I have had a fever for three days")
         assert result == "en", f"Expected 'en', got '{result}'"
 
-    def test_hinglish_mixed_script(self):
-        result = infer_language_from_text("मुझे दो दिन से fever है")
-        assert result == "hinglish", f"Expected 'hinglish', got '{result}'"
+    def test_pure_english_main_problem(self):
+        result = infer_language_from_text("What is your main problem today?")
+        assert result == "en", f"Expected 'en', got '{result}'"
 
-    def test_hinglish_chest_pain(self):
-        result = infer_language_from_text("मेरे chest में pain है")
-        assert result == "hinglish", f"Expected 'hinglish', got '{result}'"
-
-    def test_hinglish_medical_terms(self):
-        result = infer_language_from_text("मुझे बहुत weakness है और nausea भी हो रही है")
-        assert result == "hinglish", f"Expected 'hinglish', got '{result}'"
+    def test_pure_hindi_three_days_devanagari(self):
+        result = infer_language_from_text("मुझे तीन दिन से बुखार है")
+        assert result == "hi", f"Expected 'hi', got '{result}'"
 
     def test_empty_string(self):
         assert infer_language_from_text("") == "unknown"
@@ -373,6 +373,110 @@ class TestLanguageInference:
         )
         # 3 Hindi words vs many English words — expect hinglish or en
         assert result in {"hinglish", "en"}
+
+
+class TestTranscriberLanguagePrecedence:
+    """Verify that confident text-based language heuristics take precedence
+    over conflicting raw Whisper language tokens in transcriber.py.
+    """
+
+    def test_devanagari_overrides_whisper_en(self, monkeypatch, tmp_path):
+        import soundfile as sf
+        import numpy as np
+        from ayusetu.ai.voice.asr import transcriber
+        from ayusetu.ai.voice.asr.model import RawTranscriptionResult, RawSegment
+
+        # Create dummy non-silent wav
+        wav_file = tmp_path / "test.wav"
+        t = np.linspace(0, 0.5, 8000, False)
+        signal = (0.5 * np.sin(2 * np.pi * 440 * t)).astype(np.float32)
+        sf.write(str(wav_file), signal, 16000, format="WAV")
+
+        class MockBackend:
+            def transcribe(self, audio):
+                return RawTranscriptionResult(
+                    text="मुझे 3 दिन से पेट में दर्द है",
+                    detected_language="en",  # Whisper emitted "en" due to "3"
+                    segments=[RawSegment(text="मुझे 3 दिन से पेट में दर्द है", avg_logprob=-0.2, start=0.0, end=0.5)],
+                    confidence_method="avg_logprob_from_segments"
+                )
+
+        monkeypatch.setattr(transcriber, "_get_or_load_backend", lambda cfg: MockBackend())
+        output = transcriber.transcribe(wav_file)
+        assert output.language == "hi"
+
+    def test_romanized_hinglish_overrides_whisper_en(self, monkeypatch, tmp_path):
+        import soundfile as sf
+        import numpy as np
+        from ayusetu.ai.voice.asr import transcriber
+        from ayusetu.ai.voice.asr.model import RawTranscriptionResult, RawSegment
+
+        wav_file = tmp_path / "test.wav"
+        t = np.linspace(0, 0.5, 8000, False)
+        signal = (0.5 * np.sin(2 * np.pi * 440 * t)).astype(np.float32)
+        sf.write(str(wav_file), signal, 16000, format="WAV")
+
+        class MockBackend:
+            def transcribe(self, audio):
+                return RawTranscriptionResult(
+                    text="mera pet dard kar raha hai",
+                    detected_language="en",
+                    segments=[RawSegment(text="mera pet dard kar raha hai", avg_logprob=-0.2, start=0.0, end=0.5)],
+                    confidence_method="avg_logprob_from_segments"
+                )
+
+        monkeypatch.setattr(transcriber, "_get_or_load_backend", lambda cfg: MockBackend())
+        output = transcriber.transcribe(wav_file)
+        assert output.language == "hinglish"
+
+    def test_mixed_script_hinglish_overrides_whisper_en(self, monkeypatch, tmp_path):
+        import soundfile as sf
+        import numpy as np
+        from ayusetu.ai.voice.asr import transcriber
+        from ayusetu.ai.voice.asr.model import RawTranscriptionResult, RawSegment
+
+        wav_file = tmp_path / "test.wav"
+        t = np.linspace(0, 0.5, 8000, False)
+        signal = (0.5 * np.sin(2 * np.pi * 440 * t)).astype(np.float32)
+        sf.write(str(wav_file), signal, 16000, format="WAV")
+
+        class MockBackend:
+            def transcribe(self, audio):
+                return RawTranscriptionResult(
+                    text="मुझे fever hai",
+                    detected_language="en",
+                    segments=[RawSegment(text="मुझे fever hai", avg_logprob=-0.2, start=0.0, end=0.5)],
+                    confidence_method="avg_logprob_from_segments"
+                )
+
+        monkeypatch.setattr(transcriber, "_get_or_load_backend", lambda cfg: MockBackend())
+        output = transcriber.transcribe(wav_file)
+        assert output.language == "hinglish"
+
+    def test_pure_english_matches_whisper_en(self, monkeypatch, tmp_path):
+        import soundfile as sf
+        import numpy as np
+        from ayusetu.ai.voice.asr import transcriber
+        from ayusetu.ai.voice.asr.model import RawTranscriptionResult, RawSegment
+
+        wav_file = tmp_path / "test.wav"
+        t = np.linspace(0, 0.5, 8000, False)
+        signal = (0.5 * np.sin(2 * np.pi * 440 * t)).astype(np.float32)
+        sf.write(str(wav_file), signal, 16000, format="WAV")
+
+        class MockBackend:
+            def transcribe(self, audio):
+                return RawTranscriptionResult(
+                    text="I have stomach pain",
+                    detected_language="en",
+                    segments=[RawSegment(text="I have stomach pain", avg_logprob=-0.2, start=0.0, end=0.5)],
+                    confidence_method="avg_logprob_from_segments"
+                )
+
+        monkeypatch.setattr(transcriber, "_get_or_load_backend", lambda cfg: MockBackend())
+        output = transcriber.transcribe(wav_file)
+        assert output.language == "en"
+
 
 
 # ─── Configuration ────────────────────────────────────────────────────────────

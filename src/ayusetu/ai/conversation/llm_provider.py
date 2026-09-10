@@ -1,6 +1,9 @@
 from typing import Protocol, Optional
 import os
+from dotenv import load_dotenv
 from openai import OpenAI
+
+load_dotenv()
 
 class LLMProvider(Protocol):
     """
@@ -15,14 +18,24 @@ class OpenAICompatibleProvider(LLMProvider):
     Uses the standard `openai` python package.
     By swapping the base_url, this can point to vLLM, Ollama, Groq, or OpenAI.
     """
-    def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None, model: str = "gpt-4o-mini"):
-        # We require an api key to init the client, but fallback to "dummy" for testing/mocking
+    def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None, model: Optional[str] = None):
+        load_dotenv()
         key = api_key or os.environ.get("LLM_API_KEY", "dummy")
+        url = base_url or os.environ.get("LLM_BASE_URL")
+        
         self.client = OpenAI(
             api_key=key,
-            base_url=base_url or os.environ.get("LLM_BASE_URL")
+            base_url=url
         )
-        self.model = model
+        
+        if model:
+            self.model = model
+        elif os.environ.get("LLM_MODEL"):
+            self.model = os.environ.get("LLM_MODEL")
+        elif url and "groq.com" in url:
+            self.model = "groq/compound-mini"
+        else:
+            self.model = "gpt-4o-mini"
 
     def generate(self, system_prompt: str, user_prompt: str) -> str:
         # If using dummy key in testing, return a deterministic mock
