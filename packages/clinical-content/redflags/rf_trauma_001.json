@@ -1,0 +1,34 @@
+{
+  "id": "RF-TRAUMA-001",
+  "tier": 1,
+  "version": 1,
+  "title": "Acute Head Injury / Severe Trauma",
+  "description": "Recent head trauma presenting with vomiting or loss of consciousness",
+  "when": {
+    "all": [
+      {
+        "any": [
+          { "slot": "symptoms.head_injury", "is_true": true },
+          { "slot": "hpi.head_injury", "is_true": true },
+          { "slot": "symptoms.recent_head_trauma", "is_true": true },
+          { "slot": "hpi.recent_head_trauma", "is_true": true }
+        ]
+      },
+      {
+        "any": [
+          { "slot": "symptoms.vomiting", "is_true": true },
+          { "slot": "hpi.vomiting", "is_true": true },
+          { "slot": "symptoms.loss_of_consciousness", "is_true": true },
+          { "slot": "hpi.loss_of_consciousness", "is_true": true }
+        ]
+      }
+    ]
+  },
+  "action": {
+    "escalate": "triage_desk",
+    "queue_priority": "immediate",
+    "patient_message_key": "calm_wait"
+  },
+  "approved_by": "CAB-2026-03",
+  "approved_at": "2026-03-14"
+}

@@ -1,9 +1,9 @@
 {
   "id": "RF-ENDO-001",
-  "tier": 2,
-  "version": 1,
-  "title": "Hyperglycemic Crisis Cluster",
-  "description": "Known diabetes presenting with severe acute vomiting or altered consciousness",
+  "tier": 1,
+  "version": 2,
+  "title": "Hyperglycemic Crisis / Metabolic Emergency",
+  "description": "Known diabetes presenting with acute drowsiness, confusion, severe vomiting, or extreme blood glucose values",
   "when": {
     "all": [
       {
@@ -17,15 +17,20 @@
           { "slot": "symptoms.severe_vomiting", "is_true": true },
           { "slot": "hpi.severe_vomiting", "is_true": true },
           { "slot": "symptoms.altered_sensorium", "is_true": true },
-          { "slot": "hpi.altered_sensorium", "is_true": true }
+          { "slot": "hpi.altered_sensorium", "is_true": true },
+          { "slot": "symptoms.drowsiness", "is_true": true },
+          { "slot": "hpi.drowsiness", "is_true": true },
+          { "slot": "symptoms.confusion", "is_true": true },
+          { "slot": "hpi.confusion", "is_true": true },
+          { "slot": "vitals.glucose_extreme", "is_true": true }
         ]
       }
     ]
   },
   "action": {
-    "escalate": "physician_banner",
-    "queue_priority": "urgent",
-    "patient_message_key": "none"
+    "escalate": "triage_desk",
+    "queue_priority": "immediate",
+    "patient_message_key": "calm_wait"
   },
   "approved_by": "CAB-2026-03",
   "approved_at": "2026-03-14"

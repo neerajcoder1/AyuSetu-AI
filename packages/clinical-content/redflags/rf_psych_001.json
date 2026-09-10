@@ -1,0 +1,24 @@
+{
+  "id": "RF-PSYCH-001",
+  "tier": 1,
+  "version": 1,
+  "title": "Acute Self-Harm / Psychiatric Emergency",
+  "description": "Active self-harm ideation, suicide plan, or recent self-harm attempt",
+  "when": {
+    "any": [
+      { "slot": "symptoms.self_harm_ideation", "is_true": true },
+      { "slot": "hpi.self_harm_ideation", "is_true": true },
+      { "slot": "symptoms.self_harm_plan", "is_true": true },
+      { "slot": "hpi.self_harm_plan", "is_true": true },
+      { "slot": "symptoms.self_harm_attempt", "is_true": true },
+      { "slot": "hpi.self_harm_attempt", "is_true": true }
+    ]
+  },
+  "action": {
+    "escalate": "triage_desk",
+    "queue_priority": "immediate",
+    "patient_message_key": "tele_manas_support"
+  },
+  "approved_by": "CAB-2026-03",
+  "approved_at": "2026-03-14"
+}

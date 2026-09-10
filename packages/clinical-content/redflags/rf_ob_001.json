@@ -1,9 +1,9 @@
 {
   "id": "RF-OB-001",
-  "tier": 3,
-  "version": 1,
-  "title": "High-Risk Pregnancy Caution",
-  "description": "Active pregnancy with acute complication indicators requiring obstetric review",
+  "tier": 1,
+  "version": 2,
+  "title": "High-Risk Obstetric Emergency",
+  "description": "Active pregnancy with acute vaginal bleeding, severe headache, reduced fetal movement, or convulsions",
   "when": {
     "all": [
       {
@@ -15,15 +15,21 @@
       {
         "any": [
           { "slot": "symptoms.pregnancy_bleeding", "is_true": true },
-          { "slot": "symptoms.severe_headache", "is_true": true }
+          { "slot": "hpi.pregnancy_bleeding", "is_true": true },
+          { "slot": "symptoms.severe_headache", "is_true": true },
+          { "slot": "hpi.severe_headache", "is_true": true },
+          { "slot": "symptoms.reduced_fetal_movement", "is_true": true },
+          { "slot": "hpi.reduced_fetal_movement", "is_true": true },
+          { "slot": "symptoms.convulsions", "is_true": true },
+          { "slot": "hpi.convulsions", "is_true": true }
         ]
       }
     ]
   },
   "action": {
-    "escalate": "inline_flag",
-    "queue_priority": "advisory",
-    "patient_message_key": "none"
+    "escalate": "triage_desk",
+    "queue_priority": "immediate",
+    "patient_message_key": "calm_wait"
   },
   "approved_by": "CAB-2026-03",
   "approved_at": "2026-03-14"

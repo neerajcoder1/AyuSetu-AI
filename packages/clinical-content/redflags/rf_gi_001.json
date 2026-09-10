@@ -1,9 +1,9 @@
 {
   "id": "RF-GI-001",
-  "tier": 2,
-  "version": 1,
-  "title": "Acute Peritoneal / Abdominal Rigidity",
-  "description": "Severe acute abdominal pain presenting with involuntary guarding or abdominal wall rigidity",
+  "tier": 1,
+  "version": 2,
+  "title": "Acute Peritoneal / Abdominal Emergency",
+  "description": "Severe sudden abdominal pain with abdominal wall rigidity, involuntary guarding, or obstipation with vomiting",
   "when": {
     "all": [
       {
@@ -15,15 +15,17 @@
       {
         "any": [
           { "slot": "symptoms.abdominal_rigidity", "is_true": true },
-          { "slot": "hpi.abdominal_rigidity", "is_true": true }
+          { "slot": "hpi.abdominal_rigidity", "is_true": true },
+          { "slot": "symptoms.obstipation_with_vomiting", "is_true": true },
+          { "slot": "hpi.obstipation_with_vomiting", "is_true": true }
         ]
       }
     ]
   },
   "action": {
-    "escalate": "physician_banner",
-    "queue_priority": "urgent",
-    "patient_message_key": "none"
+    "escalate": "triage_desk",
+    "queue_priority": "immediate",
+    "patient_message_key": "calm_wait"
   },
   "approved_by": "CAB-2026-03",
   "approved_at": "2026-03-14"

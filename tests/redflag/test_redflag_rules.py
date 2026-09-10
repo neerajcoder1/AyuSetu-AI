@@ -5,20 +5,22 @@ Validates deterministic evaluation of each PRD-backed clinical safety rule.
 Tests positive matching, negative matching, missing facts, and threshold boundaries.
 """
 
-from ayusetu.redflag.rules import CLINICAL_RULES_REGISTRY, get_rule_by_id
+from ayusetu.redflag.rules import get_clinical_rules_registry, get_rule_by_id, reset_rules_registry_for_testing
 from ayusetu.redflag.models import RedFlagTier
 
 
 def test_registry_contains_authoritative_rules():
-    """Verify registry contains all 11 authoritative rules across 3 tiers."""
-    assert len(CLINICAL_RULES_REGISTRY) == 11
-    tier1_rules = [r for r in CLINICAL_RULES_REGISTRY if r.tier == RedFlagTier.TIER_1]
-    tier2_rules = [r for r in CLINICAL_RULES_REGISTRY if r.tier == RedFlagTier.TIER_2]
-    tier3_rules = [r for r in CLINICAL_RULES_REGISTRY if r.tier == RedFlagTier.TIER_3]
+    """Verify registry contains all 15 authoritative rules across 3 tiers."""
+    reset_rules_registry_for_testing(None)
+    rules = get_clinical_rules_registry()
+    assert len(rules) == 15
+    tier1_rules = [r for r in rules if r.tier == RedFlagTier.TIER_1]
+    tier2_rules = [r for r in rules if r.tier == RedFlagTier.TIER_2]
+    tier3_rules = [r for r in rules if r.tier == RedFlagTier.TIER_3]
 
-    assert len(tier1_rules) == 5  # RF-CARD-001, RF-RESP-001, RF-NEURO-001, RF-IMM-001, RF-HEM-001
-    assert len(tier2_rules) == 4  # RF-CARD-002, RF-INF-001, RF-GI-001, RF-ENDO-001
-    assert len(tier3_rules) == 2  # RF-ALLERGY-001, RF-OB-001
+    assert len(tier1_rules) == 12
+    assert len(tier2_rules) == 2
+    assert len(tier3_rules) == 1
 
 
 def test_rf_card_001_acute_coronary_warning():
@@ -80,6 +82,7 @@ def test_rf_imm_001_anaphylaxis():
     """RF-IMM-001: Acute anaphylaxis or laryngeal edema."""
     rule = get_rule_by_id("RF-IMM-001")
     assert rule is not None
+    assert rule.tier == RedFlagTier.TIER_1
     assert rule.predicate({"allergies.acute_anaphylaxis": True}) is True
     assert rule.predicate({"symptoms.laryngeal_edema": True}) is True
     assert rule.predicate({"allergies.seasonal_rhinitis": True}) is False
@@ -89,6 +92,7 @@ def test_rf_hem_001_hemorrhage():
     """RF-HEM-001: Massive active bleeding."""
     rule = get_rule_by_id("RF-HEM-001")
     assert rule is not None
+    assert rule.tier == RedFlagTier.TIER_1
     assert rule.predicate({"symptoms.active_hemorrhage": True}) is True
     assert rule.predicate({"symptoms.minor_cut": True}) is False
 
@@ -110,7 +114,7 @@ def test_rf_card_002_hypertensive_urgency():
 
 
 def test_rf_inf_001_meningism():
-    """RF-INF-001: Fever AND neck stiffness."""
+    """RF-INF-001: Fever AND neck stiffness (Tier 2)."""
     rule = get_rule_by_id("RF-INF-001")
     assert rule is not None
     assert rule.tier == RedFlagTier.TIER_2
@@ -121,28 +125,30 @@ def test_rf_inf_001_meningism():
 
 
 def test_rf_gi_001_acute_abdomen():
-    """RF-GI-001: Severe abdominal pain AND rigidity."""
+    """RF-GI-001: Severe abdominal pain AND rigidity / obstipation (Tier 1)."""
     rule = get_rule_by_id("RF-GI-001")
     assert rule is not None
-    assert rule.tier == RedFlagTier.TIER_2
+    assert rule.tier == RedFlagTier.TIER_1
 
     assert rule.predicate({"symptoms.abdominal_pain": True, "symptoms.abdominal_rigidity": True}) is True
+    assert rule.predicate({"symptoms.abdominal_pain": True, "symptoms.obstipation_with_vomiting": True}) is True
     assert rule.predicate({"symptoms.abdominal_pain": True}) is False
 
 
 def test_rf_endo_001_hyperglycemic_crisis():
-    """RF-ENDO-001: Known diabetes AND (severe vomiting OR altered sensorium)."""
+    """RF-ENDO-001: Known diabetes AND (severe vomiting OR altered sensorium OR drowsiness/confusion) (Tier 1)."""
     rule = get_rule_by_id("RF-ENDO-001")
     assert rule is not None
-    assert rule.tier == RedFlagTier.TIER_2
+    assert rule.tier == RedFlagTier.TIER_1
 
     assert rule.predicate({"past_history.diabetes": True, "symptoms.severe_vomiting": True}) is True
     assert rule.predicate({"past_history.diabetes": True, "symptoms.altered_sensorium": True}) is True
+    assert rule.predicate({"past_history.diabetes": True, "symptoms.confusion": True}) is True
     assert rule.predicate({"symptoms.severe_vomiting": True}) is False  # Missing diabetes
 
 
 def test_rf_allergy_001_severe_drug_allergy():
-    """RF-ALLERGY-001: Documented severe drug allergy."""
+    """RF-ALLERGY-001: Documented severe drug allergy (Tier 3)."""
     rule = get_rule_by_id("RF-ALLERGY-001")
     assert rule is not None
     assert rule.tier == RedFlagTier.TIER_3
@@ -152,12 +158,65 @@ def test_rf_allergy_001_severe_drug_allergy():
     assert rule.predicate({}) is False
 
 
-def test_rf_ob_001_pregnancy_caution():
-    """RF-OB-001: Pregnancy AND (bleeding OR severe headache)."""
+def test_rf_ob_001_pregnancy_emergency():
+    """RF-OB-001: Pregnancy AND (bleeding OR severe headache OR reduced fetal movement OR convulsions) (Tier 1)."""
     rule = get_rule_by_id("RF-OB-001")
     assert rule is not None
-    assert rule.tier == RedFlagTier.TIER_3
+    assert rule.tier == RedFlagTier.TIER_1
 
     assert rule.predicate({"patient.is_pregnant": True, "symptoms.pregnancy_bleeding": True}) is True
     assert rule.predicate({"patient.is_pregnant": True, "symptoms.severe_headache": True}) is True
+    assert rule.predicate({"patient.is_pregnant": True, "symptoms.reduced_fetal_movement": True}) is True
+    assert rule.predicate({"patient.is_pregnant": True, "symptoms.convulsions": True}) is True
     assert rule.predicate({"patient.is_pregnant": True}) is False
+
+
+def test_rf_sepsis_001_severe_sepsis():
+    """RF-SEPSIS-001: Fever AND (confusion OR oliguria/low urine output OR rigors) (Tier 1)."""
+    rule = get_rule_by_id("RF-SEPSIS-001")
+    assert rule is not None
+    assert rule.tier == RedFlagTier.TIER_1
+
+    assert rule.predicate({"symptoms.fever": True, "symptoms.confusion": True}) is True
+    assert rule.predicate({"symptoms.fever": True, "symptoms.low_urine_output": True}) is True
+    assert rule.predicate({"symptoms.fever": True, "symptoms.rigors": True}) is True
+    assert rule.predicate({"symptoms.fever": True}) is False
+    assert rule.predicate({"symptoms.rigors": True}) is False
+
+
+def test_rf_paed_001_paediatric_emergency():
+    """RF-PAED-001: Infant/child refusing feeds, lethargy, convulsion, fast breathing (Tier 1)."""
+    rule = get_rule_by_id("RF-PAED-001")
+    assert rule is not None
+    assert rule.tier == RedFlagTier.TIER_1
+
+    assert rule.predicate({"symptoms.infant_refusing_feeds": True}) is True
+    assert rule.predicate({"symptoms.pediatric_lethargy": True}) is True
+    assert rule.predicate({"symptoms.pediatric_convulsion": True}) is True
+    assert rule.predicate({"symptoms.pediatric_fast_breathing": True}) is True
+    assert rule.predicate({"symptoms.mild_cough": True}) is False
+
+
+def test_rf_psych_001_self_harm_emergency():
+    """RF-PSYCH-001: Self-harm ideation, plan, or recent attempt (Tier 1)."""
+    rule = get_rule_by_id("RF-PSYCH-001")
+    assert rule is not None
+    assert rule.tier == RedFlagTier.TIER_1
+
+    assert rule.predicate({"symptoms.self_harm_ideation": True}) is True
+    assert rule.predicate({"symptoms.self_harm_plan": True}) is True
+    assert rule.predicate({"symptoms.self_harm_attempt": True}) is True
+    assert rule.predicate({"symptoms.sadness": True}) is False
+    assert rule.action.patient_message_key == "tele_manas_support"
+
+
+def test_rf_trauma_001_head_injury():
+    """RF-TRAUMA-001: Head injury AND (vomiting OR loss of consciousness) (Tier 1)."""
+    rule = get_rule_by_id("RF-TRAUMA-001")
+    assert rule is not None
+    assert rule.tier == RedFlagTier.TIER_1
+
+    assert rule.predicate({"symptoms.head_injury": True, "symptoms.vomiting": True}) is True
+    assert rule.predicate({"symptoms.head_injury": True, "symptoms.loss_of_consciousness": True}) is True
+    assert rule.predicate({"symptoms.head_injury": True}) is False
+    assert rule.predicate({"symptoms.vomiting": True}) is False

@@ -21,17 +21,18 @@ from ayusetu.redflag.rules import (
 )
 
 
-def test_loader_loads_all_11_authoritative_rules():
-    """Verify loader successfully parses all 11 versioned clinical-content rules."""
+def test_loader_loads_all_15_authoritative_rules():
+    """Verify loader successfully parses all 15 versioned clinical-content rules."""
     reset_rules_registry_for_testing(None)
     rules = get_clinical_rules_registry()
-    assert len(rules) == 11
+    assert len(rules) == 15
 
     rule_ids = {r.rule_id for r in rules}
     expected_ids = {
         "RF-CARD-001", "RF-RESP-001", "RF-NEURO-001", "RF-IMM-001", "RF-HEM-001",
         "RF-CARD-002", "RF-INF-001", "RF-GI-001", "RF-ENDO-001",
-        "RF-ALLERGY-001", "RF-OB-001"
+        "RF-ALLERGY-001", "RF-OB-001", "RF-SEPSIS-001", "RF-PAED-001",
+        "RF-PSYCH-001", "RF-TRAUMA-001"
     }
     assert rule_ids == expected_ids
 

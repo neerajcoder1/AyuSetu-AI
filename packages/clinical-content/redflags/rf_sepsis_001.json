@@ -1,0 +1,39 @@
+{
+  "id": "RF-SEPSIS-001",
+  "tier": 1,
+  "version": 1,
+  "title": "Severe Sepsis / Septic Shock Warning",
+  "description": "High fever presenting with acute confusion, oliguria, or rigors",
+  "when": {
+    "all": [
+      {
+        "any": [
+          { "slot": "symptoms.fever", "is_true": true },
+          { "slot": "hpi.fever", "is_true": true },
+          { "slot": "vitals.high_fever", "is_true": true }
+        ]
+      },
+      {
+        "any": [
+          { "slot": "symptoms.confusion", "is_true": true },
+          { "slot": "hpi.confusion", "is_true": true },
+          { "slot": "symptoms.altered_sensorium", "is_true": true },
+          { "slot": "hpi.altered_sensorium", "is_true": true },
+          { "slot": "symptoms.oliguria", "is_true": true },
+          { "slot": "hpi.oliguria", "is_true": true },
+          { "slot": "symptoms.low_urine_output", "is_true": true },
+          { "slot": "hpi.low_urine_output", "is_true": true },
+          { "slot": "symptoms.rigors", "is_true": true },
+          { "slot": "hpi.rigors", "is_true": true }
+        ]
+      }
+    ]
+  },
+  "action": {
+    "escalate": "triage_desk",
+    "queue_priority": "immediate",
+    "patient_message_key": "calm_wait"
+  },
+  "approved_by": "CAB-2026-03",
+  "approved_at": "2026-03-14"
+}

@@ -1,0 +1,26 @@
+{
+  "id": "RF-PAED-001",
+  "tier": 1,
+  "version": 1,
+  "title": "Acute Paediatric Warning Signs",
+  "description": "Infant or young child refusing feeds, with acute lethargy, convulsions, or fast breathing",
+  "when": {
+    "any": [
+      { "slot": "symptoms.infant_refusing_feeds", "is_true": true },
+      { "slot": "hpi.infant_refusing_feeds", "is_true": true },
+      { "slot": "symptoms.pediatric_lethargy", "is_true": true },
+      { "slot": "hpi.pediatric_lethargy", "is_true": true },
+      { "slot": "symptoms.pediatric_convulsion", "is_true": true },
+      { "slot": "hpi.pediatric_convulsion", "is_true": true },
+      { "slot": "symptoms.pediatric_fast_breathing", "is_true": true },
+      { "slot": "hpi.pediatric_fast_breathing", "is_true": true }
+    ]
+  },
+  "action": {
+    "escalate": "triage_desk",
+    "queue_priority": "immediate",
+    "patient_message_key": "calm_wait"
+  },
+  "approved_by": "CAB-2026-03",
+  "approved_at": "2026-03-14"
+}
