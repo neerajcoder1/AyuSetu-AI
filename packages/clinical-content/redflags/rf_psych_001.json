@@ -1,9 +1,9 @@
 {
   "id": "RF-PSYCH-001",
   "tier": 1,
-  "version": 1,
+  "version": 2,
   "title": "Acute Self-Harm / Psychiatric Emergency",
-  "description": "Active self-harm ideation, suicide plan, or recent self-harm attempt",
+  "description": "Self-harm ideation, plan, or recent attempt",
   "when": {
     "any": [
       { "slot": "symptoms.self_harm_ideation", "is_true": true },

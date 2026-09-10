@@ -1,11 +1,17 @@
 {
   "id": "RF-RESP-001",
   "tier": 1,
-  "version": 1,
+  "version": 2,
   "title": "Acute Respiratory Compromise",
-  "description": "Acute severe dyspnea, stridor, or documented hypoxia (SpO2 < 90%)",
+  "description": "Breathlessness at rest, inability to complete a sentence, reported cyanosis, stridor, or documented hypoxia (SpO2 < 90%)",
   "when": {
     "any": [
+      { "slot": "symptoms.breathlessness_at_rest", "is_true": true },
+      { "slot": "hpi.breathlessness_at_rest", "is_true": true },
+      { "slot": "symptoms.inability_to_complete_sentence", "is_true": true },
+      { "slot": "hpi.inability_to_complete_sentence", "is_true": true },
+      { "slot": "symptoms.cyanosis", "is_true": true },
+      { "slot": "hpi.cyanosis", "is_true": true },
       { "slot": "symptoms.stridor", "is_true": true },
       { "slot": "hpi.stridor", "is_true": true },
       { "slot": "symptoms.dyspnea_severe", "is_true": true },

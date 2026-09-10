@@ -66,4 +66,5 @@ def test_engine_trigger_text_is_zero_phi_template():
     rule, trigger_text = matched[0]
 
     assert rule.rule_id == "RF-RESP-001"
-    assert trigger_text == "Acute severe dyspnea, stridor, or documented hypoxia (SpO2 < 90%)"
+    assert trigger_text == rule.description
+    assert "stridor" in trigger_text.lower()

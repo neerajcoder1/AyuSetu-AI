@@ -1,19 +1,33 @@
 {
   "id": "RF-NEURO-001",
   "tier": 1,
-  "version": 1,
+  "version": 2,
   "title": "Acute Neurological Deficit / Stroke Signs",
-  "description": "Sudden focal neurological deficit, facial droop, slurred speech, or acute altered sensorium",
+  "description": "Sudden unilateral weakness or numbness, facial droop, sudden speech difficulty, worst-ever headache, or new seizure",
   "when": {
     "any": [
       { "slot": "symptoms.focal_deficit", "is_true": true },
       { "slot": "hpi.focal_deficit", "is_true": true },
+      { "slot": "symptoms.unilateral_weakness", "is_true": true },
+      { "slot": "hpi.unilateral_weakness", "is_true": true },
+      { "slot": "symptoms.unilateral_numbness", "is_true": true },
+      { "slot": "hpi.unilateral_numbness", "is_true": true },
       { "slot": "symptoms.facial_droop", "is_true": true },
       { "slot": "hpi.facial_droop", "is_true": true },
       { "slot": "symptoms.speech_slur", "is_true": true },
       { "slot": "hpi.speech_slur", "is_true": true },
+      { "slot": "symptoms.sudden_speech_difficulty", "is_true": true },
+      { "slot": "hpi.sudden_speech_difficulty", "is_true": true },
       { "slot": "symptoms.altered_sensorium", "is_true": true },
-      { "slot": "hpi.altered_sensorium", "is_true": true }
+      { "slot": "hpi.altered_sensorium", "is_true": true },
+      { "slot": "symptoms.worst_ever_headache", "is_true": true },
+      { "slot": "hpi.worst_ever_headache", "is_true": true },
+      { "slot": "symptoms.thunderclap_headache", "is_true": true },
+      { "slot": "hpi.thunderclap_headache", "is_true": true },
+      { "slot": "symptoms.new_seizure", "is_true": true },
+      { "slot": "hpi.new_seizure", "is_true": true },
+      { "slot": "symptoms.seizure", "is_true": true },
+      { "slot": "hpi.seizure", "is_true": true }
     ]
   },
   "action": {

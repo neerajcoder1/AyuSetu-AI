@@ -1,15 +1,17 @@
 {
   "id": "RF-CARD-001",
   "tier": 1,
-  "version": 1,
+  "version": 2,
   "title": "Acute Coronary Warning Cluster",
-  "description": "Severe acute chest pain radiating to arm/jaw or associated with diaphoresis/dyspnea",
+  "description": "Chest pain or pressure with dyspnoea, sweating, radiation to arm/jaw, or exertional pattern",
   "when": {
     "all": [
       {
         "any": [
           { "slot": "symptoms.chest_pain", "is_true": true },
-          { "slot": "hpi.chest_pain", "is_true": true }
+          { "slot": "hpi.chest_pain", "is_true": true },
+          { "slot": "symptoms.chest_pressure", "is_true": true },
+          { "slot": "hpi.chest_pressure", "is_true": true }
         ]
       },
       {
@@ -18,8 +20,12 @@
           { "slot": "hpi.radiation", "is_true": true },
           { "slot": "symptoms.diaphoresis", "is_true": true },
           { "slot": "hpi.diaphoresis", "is_true": true },
+          { "slot": "symptoms.sweating", "is_true": true },
+          { "slot": "hpi.sweating", "is_true": true },
           { "slot": "symptoms.dyspnea", "is_true": true },
-          { "slot": "hpi.dyspnea", "is_true": true }
+          { "slot": "hpi.dyspnea", "is_true": true },
+          { "slot": "symptoms.exertional_pattern", "is_true": true },
+          { "slot": "hpi.exertional_pattern", "is_true": true }
         ]
       }
     ]

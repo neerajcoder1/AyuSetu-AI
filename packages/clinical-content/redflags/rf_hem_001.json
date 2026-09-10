@@ -1,13 +1,25 @@
 {
   "id": "RF-HEM-001",
   "tier": 1,
-  "version": 1,
+  "version": 2,
   "title": "Massive Active Hemorrhage",
-  "description": "Massive active hemorrhage or acute hemodynamic instability",
+  "description": "Haematemesis, melaena, heavy vaginal bleeding, or uncontrolled bleeding",
   "when": {
     "any": [
       { "slot": "symptoms.active_hemorrhage", "is_true": true },
-      { "slot": "hpi.active_hemorrhage", "is_true": true }
+      { "slot": "hpi.active_hemorrhage", "is_true": true },
+      { "slot": "symptoms.haematemesis", "is_true": true },
+      { "slot": "hpi.haematemesis", "is_true": true },
+      { "slot": "symptoms.hematemesis", "is_true": true },
+      { "slot": "hpi.hematemesis", "is_true": true },
+      { "slot": "symptoms.melaena", "is_true": true },
+      { "slot": "hpi.melaena", "is_true": true },
+      { "slot": "symptoms.melena", "is_true": true },
+      { "slot": "hpi.melena", "is_true": true },
+      { "slot": "symptoms.heavy_vaginal_bleeding", "is_true": true },
+      { "slot": "hpi.heavy_vaginal_bleeding", "is_true": true },
+      { "slot": "symptoms.uncontrolled_bleeding", "is_true": true },
+      { "slot": "hpi.uncontrolled_bleeding", "is_true": true }
     ]
   },
   "action": {

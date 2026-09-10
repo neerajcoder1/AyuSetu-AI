@@ -24,7 +24,7 @@ def test_registry_contains_authoritative_rules():
 
 
 def test_rf_card_001_acute_coronary_warning():
-    """RF-CARD-001: Chest pain with radiation or diaphoresis or dyspnea triggers Tier 1."""
+    """RF-CARD-001: Chest pain/pressure with radiation, diaphoresis, dyspnea, sweating, or exertional pattern triggers Tier 1."""
     rule = get_rule_by_id("RF-CARD-001")
     assert rule is not None
     assert rule.tier == RedFlagTier.TIER_1
@@ -32,13 +32,20 @@ def test_rf_card_001_acute_coronary_warning():
     # Positive match: chest pain + radiation
     assert rule.predicate({"symptoms.chest_pain": True, "symptoms.radiation": True}) is True
 
-    # Positive match: chest pain + diaphoresis
+    # Positive match: chest pain + diaphoresis / sweating
     assert rule.predicate({"symptoms.chest_pain": "true", "symptoms.diaphoresis": "yes"}) is True
+    assert rule.predicate({"symptoms.chest_pain": True, "symptoms.sweating": True}) is True
 
-    # Negative match: chest pain without radiation or diaphoresis or dyspnea
+    # Positive match: chest pressure + exertional pattern
+    assert rule.predicate({"symptoms.chest_pressure": True, "symptoms.exertional_pattern": True}) is True
+
+    # Positive match: chest pressure + dyspnea
+    assert rule.predicate({"hpi.chest_pressure": True, "hpi.dyspnea": True}) is True
+
+    # Negative match: chest pain without associated symptoms
     assert rule.predicate({"symptoms.chest_pain": True}) is False
 
-    # Negative match: radiation without chest pain
+    # Negative match: radiation without chest pain/pressure
     assert rule.predicate({"symptoms.radiation": True}) is False
 
     # Missing facts: empty dict
@@ -46,7 +53,7 @@ def test_rf_card_001_acute_coronary_warning():
 
 
 def test_rf_resp_001_respiratory_distress_and_hypoxia():
-    """RF-RESP-001: Stridor or severe dyspnea or SpO2 < 90 triggers Tier 1."""
+    """RF-RESP-001: Stridor, severe dyspnea, SpO2 < 90, breathlessness at rest, inability to complete sentence, or cyanosis triggers Tier 1."""
     rule = get_rule_by_id("RF-RESP-001")
     assert rule is not None
     assert rule.tier == RedFlagTier.TIER_1
@@ -58,6 +65,15 @@ def test_rf_resp_001_respiratory_distress_and_hypoxia():
     assert rule.predicate({"vitals.spo2": 88}) is True
     assert rule.predicate({"vitals.spo2": "89.5"}) is True
 
+    # Positive: breathlessness at rest
+    assert rule.predicate({"symptoms.breathlessness_at_rest": True}) is True
+
+    # Positive: inability to complete sentence
+    assert rule.predicate({"symptoms.inability_to_complete_sentence": True}) is True
+
+    # Positive: cyanosis
+    assert rule.predicate({"symptoms.cyanosis": True}) is True
+
     # Negative: SpO2 = 96%
     assert rule.predicate({"vitals.spo2": 96}) is False
 
@@ -66,7 +82,7 @@ def test_rf_resp_001_respiratory_distress_and_hypoxia():
 
 
 def test_rf_neuro_001_stroke_signs():
-    """RF-NEURO-001: Focal deficit, facial droop, slurred speech, altered sensorium."""
+    """RF-NEURO-001: Focal deficit, facial droop, slurred speech, altered sensorium, unilateral weakness/numbness, worst headache, new seizure."""
     rule = get_rule_by_id("RF-NEURO-001")
     assert rule is not None
     assert rule.tier == RedFlagTier.TIER_1
@@ -75,7 +91,16 @@ def test_rf_neuro_001_stroke_signs():
     assert rule.predicate({"symptoms.speech_slur": True}) is True
     assert rule.predicate({"symptoms.altered_sensorium": True}) is True
     assert rule.predicate({"symptoms.focal_deficit": True}) is True
+    assert rule.predicate({"symptoms.unilateral_weakness": True}) is True
+    assert rule.predicate({"symptoms.unilateral_numbness": True}) is True
+    assert rule.predicate({"symptoms.worst_ever_headache": True}) is True
+    assert rule.predicate({"symptoms.thunderclap_headache": True}) is True
+    assert rule.predicate({"symptoms.new_seizure": True}) is True
+    assert rule.predicate({"symptoms.seizure": True}) is True
+
+    # Negative match: mild headache or dizziness without red flags
     assert rule.predicate({"symptoms.headache": True}) is False
+    assert rule.predicate({"symptoms.dizziness": True}) is False
 
 
 def test_rf_imm_001_anaphylaxis():
@@ -89,12 +114,21 @@ def test_rf_imm_001_anaphylaxis():
 
 
 def test_rf_hem_001_hemorrhage():
-    """RF-HEM-001: Massive active bleeding."""
+    """RF-HEM-001: Massive active bleeding, haematemesis, melaena, heavy vaginal bleeding, uncontrolled bleeding."""
     rule = get_rule_by_id("RF-HEM-001")
     assert rule is not None
     assert rule.tier == RedFlagTier.TIER_1
     assert rule.predicate({"symptoms.active_hemorrhage": True}) is True
+    assert rule.predicate({"symptoms.haematemesis": True}) is True
+    assert rule.predicate({"symptoms.hematemesis": True}) is True
+    assert rule.predicate({"symptoms.melaena": True}) is True
+    assert rule.predicate({"symptoms.melena": True}) is True
+    assert rule.predicate({"symptoms.heavy_vaginal_bleeding": True}) is True
+    assert rule.predicate({"symptoms.uncontrolled_bleeding": True}) is True
+
+    # Negative: minor cut or nosebleed
     assert rule.predicate({"symptoms.minor_cut": True}) is False
+    assert rule.predicate({"symptoms.minor_epistaxis": True}) is False
 
 
 def test_rf_card_002_hypertensive_urgency():
@@ -144,6 +178,7 @@ def test_rf_endo_001_hyperglycemic_crisis():
     assert rule.predicate({"past_history.diabetes": True, "symptoms.severe_vomiting": True}) is True
     assert rule.predicate({"past_history.diabetes": True, "symptoms.altered_sensorium": True}) is True
     assert rule.predicate({"past_history.diabetes": True, "symptoms.confusion": True}) is True
+    assert rule.predicate({"past_history.diabetes": True, "symptoms.drowsiness": True}) is True
     assert rule.predicate({"symptoms.severe_vomiting": True}) is False  # Missing diabetes
 
 
