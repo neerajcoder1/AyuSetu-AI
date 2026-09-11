@@ -62,7 +62,11 @@ class DialogueEngine:
         # 1. Extract info (only if ASR confidence is sufficient)
         extraction_result = ExtractionResult(extractions=[])
         if asr_output.confidence >= self.planner.asr_confidence_threshold:
-            extraction_result = self.extractor.extract(asr_output.text)
+            current_target_slot = state.missing_slots[0] if state and state.missing_slots else None
+            try:
+                extraction_result = self.extractor.extract(asr_output.text, target_slot=current_target_slot)
+            except TypeError:
+                extraction_result = self.extractor.extract(asr_output.text)
 
             # 1b. Update session-scoped clinical memory with extractions.
             #     Only slots that meet the extraction confidence threshold

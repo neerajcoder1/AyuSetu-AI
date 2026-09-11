@@ -16,15 +16,48 @@ export default function PatientInterviewScreen({
   const [isSendingTurn, setIsSendingTurn] = useState(false);
   const [lowConfidenceWarning, setLowConfidenceWarning] = useState(false);
   const [playingAudioIndex, setPlayingAudioIndex] = useState(null);
+  const [autoPlayNotice, setAutoPlayNotice] = useState(null);
   const [error, setError] = useState(null);
 
   const currentAudioRef = useRef(null);
   const currentAudioUrlRef = useRef(null);
 
+  // Synchronously primed audio instance to preserve user activation gesture across async API requests
+  const primedAudioRef = useRef(null);
+
   const handleSendTurn = async (audioBlob) => {
     if (!sessionId) {
       setError('No active session. Please start a session first.');
       return;
+    }
+
+    // Stop any audio currently playing from previous turn
+    if (currentAudioRef.current) {
+      currentAudioRef.current.pause();
+      currentAudioRef.current.onended = null;
+      currentAudioRef.current.onerror = null;
+      currentAudioRef.current = null;
+    }
+
+    // Synchronously prime/unlock HTMLAudioElement during user click gesture before async fetch boundary
+    try {
+      if (!primedAudioRef.current) {
+        primedAudioRef.current = new Audio();
+      }
+      const primedAudio = primedAudioRef.current;
+      // 44-byte silent WAV data URI to unlock audio playback permission
+      primedAudio.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+      const primePromise = primedAudio.play();
+      if (primePromise !== undefined) {
+        primePromise.then(() => {
+          primedAudio.pause();
+          console.log('[AudioDiag] Audio element successfully primed during user activation gesture');
+        }).catch((e) => {
+          console.warn('[AudioDiag] Audio priming gesture notification:', e);
+        });
+      }
+    } catch (e) {
+      console.warn('[AudioDiag] Audio priming exception:', e);
     }
 
     setIsSendingTurn(true);
@@ -34,10 +67,23 @@ export default function PatientInterviewScreen({
     try {
       const turnRes = await api.sendTurn(sessionId, audioBlob);
 
+      // Diagnostic logging of raw turn response audio payload
+      console.log('[AudioDiag] Turn API response received:', {
+        hasResponseAudio: Boolean(turnRes.response_audio),
+        b64Length: turnRes.response_audio ? turnRes.response_audio.length : 0,
+        sampleRate: turnRes.response_sample_rate,
+        duration: turnRes.response_duration,
+        detectedLang: turnRes.detected_language,
+        responseTextPreview: turnRes.response_text ? turnRes.response_text.substring(0, 50) : null,
+      });
+
       // Low confidence alert check
       if (turnRes.low_confidence) {
         setLowConfidenceWarning(true);
       }
+
+      // Index for the new turn being added
+      const newTurnIndex = turns.length;
 
       // Add to conversation history turns
       const newTurn = {
@@ -53,6 +99,11 @@ export default function PatientInterviewScreen({
 
       setTurns((prev) => [...prev, newTurn]);
 
+      // Automatically play the returned TTS response audio once
+      if (turnRes.response_audio) {
+        handlePlayTTS(turnRes.response_audio, newTurnIndex, true);
+      }
+
       // Trigger parent update (re-fetches state)
       if (onTurnCompleted) {
         onTurnCompleted(turnRes);
@@ -65,12 +116,19 @@ export default function PatientInterviewScreen({
     }
   };
 
-  const handlePlayTTS = (audioB64, index) => {
-    if (!audioB64) return;
+  const handlePlayTTS = (audioB64, index, isAutoPlay = false) => {
+    if (!audioB64) {
+      console.warn('[AudioDiag] handlePlayTTS called with empty audioB64');
+      return;
+    }
 
     // Stop and clean up any currently playing audio
     if (currentAudioRef.current) {
       currentAudioRef.current.pause();
+      currentAudioRef.current.onended = null;
+      currentAudioRef.current.onerror = null;
+      currentAudioRef.current.oncanplay = null;
+      currentAudioRef.current.onloadedmetadata = null;
       currentAudioRef.current = null;
     }
     if (currentAudioUrlRef.current) {
@@ -92,13 +150,24 @@ export default function PatientInterviewScreen({
       const blobUrl = URL.createObjectURL(blob);
       currentAudioUrlRef.current = blobUrl;
 
-      const audio = new Audio(blobUrl);
+      // Prefer the pre-primed Audio element to retain user activation permission across async boundaries
+      const audio = primedAudioRef.current || new Audio();
       currentAudioRef.current = audio;
+
+      console.log('[AudioDiag] Real TTS source assigned:', blobUrl);
+      console.log('[AudioDiag] Real TTS blob size:', blob.size, 'bytes');
+      console.log('[AudioDiag] Real TTS blob type:', blob.type);
 
       setPlayingAudioIndex(index);
 
       const cleanup = () => {
         setPlayingAudioIndex(null);
+        if (audio) {
+          audio.onended = null;
+          audio.onerror = null;
+          audio.oncanplay = null;
+          audio.onloadedmetadata = null;
+        }
         if (currentAudioUrlRef.current === blobUrl) {
           URL.revokeObjectURL(blobUrl);
           currentAudioUrlRef.current = null;
@@ -108,18 +177,62 @@ export default function PatientInterviewScreen({
         }
       };
 
-      audio.onended = cleanup;
-      audio.onerror = (e) => {
-        console.error('Audio playback error:', e);
+      audio.onended = () => {
+        console.log('[AudioDiag] REAL TTS playback finished');
         cleanup();
       };
 
-      audio.play().catch((err) => {
-        console.error('Audio play() failed:', err);
+      audio.onerror = (e) => {
+        console.error('[AudioDiag] Real TTS HTMLAudioElement load/playback error:', e, audio.error);
         cleanup();
-      });
+      };
+
+      console.log('[AudioDiag] waiting for media readiness');
+
+      let hasTriggeredPlay = false;
+
+      const triggerPlay = () => {
+        if (hasTriggeredPlay) return;
+        hasTriggeredPlay = true;
+
+        console.log('[AudioDiag] loadedmetadata / readiness event fired');
+        console.log('[AudioDiag] actual TTS duration:', audio.duration);
+        console.log('[AudioDiag] readyState:', audio.readyState);
+
+        const playPromise = audio.play();
+        if (playPromise !== undefined) {
+          playPromise.then(() => {
+            console.log('[AudioDiag] play() succeeded for REAL TTS audio. Duration =', audio.duration);
+            setAutoPlayNotice(null);
+          }).catch((err) => {
+            console.warn('[AudioDiag] play() rejected/blocked for REAL TTS audio:', err);
+            cleanup();
+            if (isAutoPlay) {
+              setAutoPlayNotice('Tap Play Audio to hear the response.');
+            }
+          });
+        }
+      };
+
+      audio.onloadedmetadata = () => {
+        console.log('[AudioDiag] loadedmetadata fired. actual TTS duration:', audio.duration);
+      };
+
+      audio.oncanplay = () => {
+        triggerPlay();
+      };
+
+      // Pause old media, set new source URL, and force reload
+      audio.pause();
+      audio.src = blobUrl;
+      audio.load();
+
+      // Fallback check if media is already ready synchronously
+      if (audio.readyState >= 3 && !hasTriggeredPlay) {
+        triggerPlay();
+      }
     } catch (e) {
-      console.error('TTS error:', e);
+      console.error('[AudioDiag] Real TTS playback exception:', e);
       setPlayingAudioIndex(null);
     }
   };
@@ -188,6 +301,21 @@ export default function PatientInterviewScreen({
         <div className="p-4 bg-red-50 border border-red-200 text-red-700 rounded-xl text-xs flex items-center space-x-2">
           <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
           <span>{error}</span>
+        </div>
+      )}
+
+      {autoPlayNotice && (
+        <div className="p-3 bg-sky-50 border border-sky-200 text-sky-800 text-xs rounded-xl flex items-center justify-between shadow-sm">
+          <div className="flex items-center space-x-2">
+            <Volume2 className="w-4 h-4 text-sky-600 shrink-0" />
+            <span className="font-semibold">{autoPlayNotice}</span>
+          </div>
+          <button
+            onClick={() => setAutoPlayNotice(null)}
+            className="text-sky-600 hover:text-sky-900 font-bold text-xs"
+          >
+            Dismiss
+          </button>
         </div>
       )}
 

@@ -1,4 +1,6 @@
-
+import sys
+import os
+import logging
 import numpy as np
 import torch
 from typing import Optional
@@ -7,16 +9,36 @@ from contracts.tts_result import TTSResult
 from .base import TTSProvider
 from .config import TTSConfig, get_config
 
-# Import the Chatterbox implementation from the current Python environment.
-# The package should be installed in the active environment.
+logger = logging.getLogger(__name__)
 
-try:
-    from chatterbox.tts import ChatterboxTTS as _ChatterboxTTS  # type: ignore
-except Exception as e:
-    raise ImportError(
-        "Chatterbox package could not be imported. Ensure the isolated TTS "
-        "benchmark environment is activated and the package is installed."
-    ) from e
+
+def _load_real_chatterbox_class():
+    """
+    Import the real ``chatterbox-tts`` package from Python site-packages,
+    bypassing local workspace directory collisions with ``chatterbox/``.
+    """
+    cwd = os.path.abspath(os.getcwd())
+    orig_path = sys.path[:]
+    try:
+        # Exclude workspace root directory from sys.path to force site-packages lookup
+        sys.path = [p for p in sys.path if os.path.abspath(p or ".") != cwd]
+        # Purge local mock from sys.modules if present
+        if "chatterbox" in sys.modules and getattr(sys.modules["chatterbox"], "__file__", "").startswith(cwd):
+            del sys.modules["chatterbox"]
+        if "chatterbox.tts" in sys.modules and getattr(sys.modules["chatterbox.tts"], "__file__", "").startswith(cwd):
+            del sys.modules["chatterbox.tts"]
+        from chatterbox.tts import ChatterboxTTS as _RealChatterboxTTS  # type: ignore
+        return _RealChatterboxTTS
+    except Exception as exc:
+        raise ImportError(
+            "Real Chatterbox TTS package could not be imported from site-packages. "
+            "Ensure chatterbox-tts is installed in the active environment."
+        ) from exc
+    finally:
+        sys.path = orig_path
+
+
+_ChatterboxTTS = _load_real_chatterbox_class()
 
 
 class ChatterboxTTS(TTSProvider):
@@ -29,7 +51,6 @@ class ChatterboxTTS(TTSProvider):
     _cached_model: Optional[object] = None
     _cached_device: Optional[str] = None
 
-
     def __init__(self, config: Optional[TTSConfig] = None) -> None:
         cfg = config or get_config()
         # Load model only once per device; reuse cached instance if possible.
@@ -41,7 +62,7 @@ class ChatterboxTTS(TTSProvider):
         self._sample_rate: int = getattr(self._model, "sr", 24000)
 
     def synthesize(self, text: str, language: str) -> TTSResult:
-        """Generate speech for *text* in *language*.
+        """Generate real intelligible speech for *text* in *language*.
 
         Parameters
         ----------
@@ -49,8 +70,6 @@ class ChatterboxTTS(TTSProvider):
             The raw text to be spoken.
         language: str
             Language identifier (e.g. `"hi"`, `"en"` or `"hinglish"`).
-            The current Chatterbox model does not require an explicit language
-            argument, but we keep it in the contract for consistency.
 
         Returns
         -------
@@ -58,13 +77,10 @@ class ChatterboxTTS(TTSProvider):
             A contract object containing the audio waveform, sample rate,
             duration, and the language tag.
         """
-        # The Chatterbox implementation expects ``generate`` to be called on
-        # the model instance.  It returns a ``torch.Tensor`` with shape
-        # ``(1, n_samples)``.
         try:
             torch_audio = self._model.generate(text)
         except Exception as exc:
-            raise RuntimeError(f"Chatterbox synthesis failed: {exc}") from exc
+            raise RuntimeError(f"Chatterbox real speech synthesis failed: {exc}") from exc
 
         # Ensure the tensor is on CPU and convert to a NumPy array.
         if isinstance(torch_audio, torch.Tensor):
@@ -73,6 +89,20 @@ class ChatterboxTTS(TTSProvider):
             audio_np = np.array(torch_audio)
 
         duration = float(len(audio_np) / self._sample_rate)
+
+        # Fail clearly if output audio is empty or zero-duration
+        if len(audio_np) == 0 or duration <= 0.0:
+            raise RuntimeError("Chatterbox TTS returned 0 samples or invalid duration.")
+
+        logger.info(
+            "[TTSDiag] Real speech synthesis completed: input text len: %d, provider: %s, output sample rate: %d, output channels: 1, output sample count: %d, output duration before WAV encoding: %.3fs",
+            len(text),
+            self.__class__.__name__,
+            self._sample_rate,
+            len(audio_np),
+            duration,
+        )
+
         return TTSResult(
             audio=audio_np,
             sample_rate=self._sample_rate,

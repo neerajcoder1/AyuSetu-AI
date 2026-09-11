@@ -21,6 +21,43 @@ export function useVoiceRecorder() {
     setRecordingTime(0);
     audioChunksRef.current = [];
 
+    const hostname = window.location.hostname;
+    const protocol = window.location.protocol;
+    const isHostnameIp = /^(?:\d{1,3}\.){3}\d{1,3}$/.test(hostname);
+    const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1';
+    const isSecureContext = window.isSecureContext || protocol === 'https:' || isLocalhost;
+
+    // 1. Check for insecure context (e.g. accessing via LAN IP over HTTP)
+    if (!isSecureContext || (isHostnameIp && protocol !== 'https:')) {
+      setError(
+        `Microphone access requires a secure context (HTTPS or localhost). ` +
+        `If you are accessing via LAN IP (${hostname}), please open http://localhost:5173 instead.`
+      );
+      return;
+    }
+
+    // 2. Check for navigator.mediaDevices support
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      if (isHostnameIp && protocol !== 'https:') {
+        setError(
+          `Microphone API is disabled when accessing via IP (${hostname}). Please open http://localhost:5173 instead.`
+        );
+      } else {
+        setError(
+          'Microphone recording (navigator.mediaDevices.getUserMedia) is not supported in this browser context.'
+        );
+      }
+      return;
+    }
+
+    // 3. Check for MediaRecorder API support
+    if (typeof window.MediaRecorder === 'undefined') {
+      setError(
+        'MediaRecorder API is not supported in this browser. Please try Chrome, Edge, or Firefox.'
+      );
+      return;
+    }
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       
@@ -85,7 +122,31 @@ export function useVoiceRecorder() {
       }, 1000);
     } catch (err) {
       console.error('Failed to access microphone:', err);
-      setError('Microphone access denied or not available in this browser.');
+      const errName = err.name || '';
+
+      if (errName === 'NotAllowedError' || errName === 'PermissionDeniedError') {
+        setError(
+          'Microphone permission was denied. Please click the camera/lock icon in your browser address bar to allow microphone access for this site, then click Speak again.'
+        );
+      } else if (errName === 'NotFoundError' || errName === 'DevicesNotFoundError') {
+        setError(
+          'No microphone device was found. Please connect a working microphone to your system and try again.'
+        );
+      } else if (errName === 'NotReadableError' || errName === 'TrackStartError') {
+        setError(
+          'Microphone is currently in use by another application or hardware device.'
+        );
+      } else if (errName === 'SecurityError') {
+        if (isHostnameIp && protocol !== 'https:') {
+          setError(
+            `Microphone access blocked over HTTP IP (${hostname}). Please open http://localhost:5173 instead.`
+          );
+        } else {
+          setError('Microphone access restricted due to browser security settings.');
+        }
+      } else {
+        setError(err.message || 'Unable to access microphone. Please check browser permissions and settings.');
+      }
     }
   }, []);
 
