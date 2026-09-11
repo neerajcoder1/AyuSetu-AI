@@ -133,8 +133,8 @@ _ASSOCIATED_SYMPTOM_PATTERNS: list[tuple[re.Pattern, str, float]] = [
     (re.compile(r"\b(sweating|paseena|पसीना)\b", re.I | re.U), "sweating", 0.82),
     (re.compile(r"\b(chills|kaampna|कांपना|ठंड\s*लगना)\b", re.I | re.U), "chills", 0.82),
     (re.compile(r"\b(headache|sir\s*dard|सिर\s*दर्द)\b", re.I | re.U), "headache", 0.88),
-    (re.compile(r"\b(dizziness|chakkar|चक्कर)\b", re.I | re.U), "dizziness", 0.85),
-    (re.compile(r"\b(weakness|kamzori|कमज़ोरी|thakaan|थकान)\b", re.I | re.U), "weakness", 0.82),
+    (re.compile(r"\b(dizziness|dizzy|chakkar|चक्कर)\b", re.I | re.U), "dizziness", 0.85),
+    (re.compile(r"\b(weakness|weak|kamzori|कमज़ोरी|thakaan|थकान)\b", re.I | re.U), "weakness", 0.82),
     (re.compile(r"\b(loss\s*of\s*appetite|bhookh\s*nahi|भूख\s*नहीं|khaana\s*nahi\s*khaya)\b",
                 re.I | re.U), "loss of appetite", 0.85),
 ]
@@ -209,55 +209,117 @@ def _extract_aggravating_relieving(text: str) -> Optional[ExtractedSlot]:
 # Helper: past medical history
 # ---------------------------------------------------------------------------
 
-def _extract_past_medical_history(text: str) -> Optional[ExtractedSlot]:
-    patterns = [
-        (re.compile(r"\b(diabetes|sugar\s*ki\s*bimari|madhumeh|मधुमेह|शुगर)\b",
-                    re.I | re.U), "diabetes", 0.90),
-        (re.compile(r"\b(hypertension|high\s*blood\s*pressure|BP\s*high|uccha\s*BP)\b",
-                    re.I | re.U), "hypertension", 0.90),
-        (re.compile(r"\b(asthma|damaa|दमा|saans\s*ki\s*bimari)\b",
-                    re.I | re.U), "asthma", 0.90),
-        (re.compile(r"\b(heart\s*disease|heart\s*attack|dil\s*ki\s*bimari|हृदय\s*रोग)\b",
-                    re.I | re.U), "heart disease", 0.90),
+def _extract_past_medical_history(
+    text: str,
+    target_slot: Optional[ClinicalSlot] = None,
+) -> Optional[ExtractedSlot]:
+    pos_patterns = [
+        (re.compile(r"\b(diabetes|sugar\s*ki\s*bimari|madhumeh|मधुमेह|शुगर)\b", re.I | re.U), "diabetes", 0.90),
+        (re.compile(r"\b(hypertension|high\s*blood\s*pressure|BP\s*high|uccha\s*BP)\b", re.I | re.U), "hypertension", 0.90),
+        (re.compile(r"\b(asthma|damaa|दमा|saans\s*ki\s*bimari)\b", re.I | re.U), "asthma", 0.90),
+        (re.compile(r"\b(heart\s*disease|heart\s*attack|dil\s*ki\s*bimari|हृदय\s*रोग)\b", re.I | re.U), "heart disease", 0.90),
         (re.compile(r"\b(thyroid)\b", re.I | re.U), "thyroid disorder", 0.88),
-        (re.compile(r"\b(epilepsy|seizure|mircchi|मिर्गी)\b",
-                    re.I | re.U), "epilepsy", 0.90),
-        (re.compile(r"\b(TB|tuberculosis|kshay|क्षय\s*रोग)\b",
-                    re.I | re.U), "tuberculosis", 0.90),
-        (re.compile(r"\b(jaundice|peelia|पीलिया|hepatitis)\b",
-                    re.I | re.U), "jaundice/hepatitis", 0.88),
-        (re.compile(r"\b(no\s*(?:past\s*)?(?:medical\s*)?history|koi\s*bimari\s*nahi|कोई\s*बीमारी\s*नहीं)\b",
-                    re.I | re.U), "none", 0.80),
+        (re.compile(r"\b(epilepsy|seizure|mircchi|मिर्गी)\b", re.I | re.U), "epilepsy", 0.90),
+        (re.compile(r"\b(TB|tuberculosis|kshay|क्षय\s*रोग)\b", re.I | re.U), "tuberculosis", 0.90),
+        (re.compile(r"\b(jaundice|peelia|पीलिया|hepatitis)\b", re.I | re.U), "jaundice/hepatitis", 0.88),
     ]
+
     found: List[str] = []
-    for pattern, label, _ in patterns:
+    for pattern, label, _ in pos_patterns:
         if pattern.search(text):
             found.append(label)
-    if not found:
-        return None
-    return ExtractedSlot(
-        slot=ClinicalSlot.PAST_MEDICAL_HISTORY,
-        value=", ".join(found),
-        confidence=0.88,
-        evidence=", ".join(found),
-    )
+
+    if found:
+        return ExtractedSlot(
+            slot=ClinicalSlot.PAST_MEDICAL_HISTORY,
+            value=", ".join(found),
+            confidence=0.88,
+            evidence=", ".join(found),
+        )
+
+    # Comprehensive negative patterns for past medical history/conditions
+    neg_patterns = [
+        re.compile(
+            r"(?:no|don'?t\s+have|do\s+not\s+have|have\s+no|haven'?t|neither|never|nahi|नहीं|kuch\s+nahi|koi\s+nahi)\s+"
+            r"(?:any\s+|such\s+|other\s+)*"
+            r"(?:past|previous|prior|pre[-\s]?susmedical|pre[-\s]?existing|existing|known|underlying|medical|health)?\s*"
+            r"(?:past|previous|prior|pre[-\s]?susmedical|pre[-\s]?existing|existing|known|underlying|medical|health)?\s*"
+            r"(?:condition[s]?|history|problem[s]?|issue[s]?|disease[s]?|bimari[an]?|dikkat|रोग|बीमारी)",
+            re.I | re.U,
+        ),
+        re.compile(
+            r"(?:no|none|nope|nothing|koi\s+nahi|kuch\s+nahi)\s+"
+            r"(?:past|previous|prior|pre[-\s]?susmedical|pre[-\s]?existing|medical|health)*\s*"
+            r"(?:condition[s]?|history|problem[s]?|issue[s]?|disease[s]?|bimari[an]?|dikkat)",
+            re.I | re.U,
+        ),
+        re.compile(
+            r"(?:no\s*,?\s*nothing|nothing\s+at\s+all|koi\s*bimari\s*nahi|koi\s*dikkat\s*nahi|कोई\s*बीमारी\s*नहीं)",
+            re.I | re.U,
+        ),
+    ]
+
+    for pattern in neg_patterns:
+        m = pattern.search(text)
+        if m:
+            return ExtractedSlot(
+                slot=ClinicalSlot.PAST_MEDICAL_HISTORY,
+                value="none reported",
+                confidence=0.88,
+                evidence=m.group(0),
+            )
+
+    if target_slot == ClinicalSlot.PAST_MEDICAL_HISTORY:
+        short_neg_pattern = re.compile(
+            r"(?:^|\s|\b)(?:no|nope|none|nothing|nahi|नहीं|na|naa|kuch\s*nahi|koi\s*nahi)(?:\s|$|\b)",
+            re.I | re.U,
+        )
+        m_short = short_neg_pattern.search(text)
+        if m_short:
+            return ExtractedSlot(
+                slot=ClinicalSlot.PAST_MEDICAL_HISTORY,
+                value="none reported",
+                confidence=0.85,
+                evidence=m_short.group(0),
+            )
+
+    return None
 
 
 # ---------------------------------------------------------------------------
 # Helper: medications
 # ---------------------------------------------------------------------------
 
-def _extract_medications(text: str) -> Optional[ExtractedSlot]:
-    patterns = [
+def _extract_medications(
+    text: str,
+    target_slot: Optional[ClinicalSlot] = None,
+) -> Optional[ExtractedSlot]:
+    neg_patterns = [
+        re.compile(
+            r"\b(?:no\s*medications?|not?\s+taking\s*(?:any(?:thing)?|dawai|medicines?|tablets?|goli)?|"
+            r"don'?t\s+take\s*(?:any(?:thing)?|dawai|medicines?|tablets?|goli)?|"
+            r"koi\s*dawai\s*nahi|कोई\s*दवाई\s*नहीं)\b",
+            re.I | re.U,
+        )
+    ]
+    for pattern in neg_patterns:
+        m = pattern.search(text)
+        if m:
+            return ExtractedSlot(
+                slot=ClinicalSlot.MEDICATIONS,
+                value="none",
+                confidence=0.80,
+                evidence=m.group(0),
+            )
+
+    pos_patterns = [
         re.compile(r"\b(paracetamol|crocin|tylenol|aspirin|ibuprofen|brufen|antacid|pantoprazole|"
                    r"metformin|insulin|lisinopril|atorvastatin|metoprolol|amoxicillin|azithromycin|"
                    r"cetirizine|omeprazole|dolo)\b", re.I | re.U),
         re.compile(r"\b(tablet|capsule|syrup|injection|goli|दवाई|dawai|medicine|davai)\b",
                    re.I | re.U),
-        re.compile(r"\b(no\s*medications?|koi\s*dawai\s*nahi|कोई\s*दवाई\s*नहीं)\b",
-                   re.I | re.U),
     ]
-    for pattern in patterns:
+    for pattern in pos_patterns:
         m = pattern.search(text)
         if m:
             return ExtractedSlot(
@@ -266,6 +328,17 @@ def _extract_medications(text: str) -> Optional[ExtractedSlot]:
                 confidence=0.80,
                 evidence=m.group(0),
             )
+
+    if target_slot == ClinicalSlot.MEDICATIONS:
+        short_neg = re.compile(r"\b(?:no|none|nope|nothing|nahi|नहीं|kuch\s*nahi|koi\s*nahi)\b", re.I | re.U)
+        m_short = short_neg.search(text)
+        if m_short:
+            return ExtractedSlot(
+                slot=ClinicalSlot.MEDICATIONS,
+                value="none",
+                confidence=0.80,
+                evidence=m_short.group(0),
+            )
     return None
 
 
@@ -273,7 +346,10 @@ def _extract_medications(text: str) -> Optional[ExtractedSlot]:
 # Helper: allergies
 # ---------------------------------------------------------------------------
 
-def _extract_allergies(text: str) -> Optional[ExtractedSlot]:
+def _extract_allergies(
+    text: str,
+    target_slot: Optional[ClinicalSlot] = None,
+) -> Optional[ExtractedSlot]:
     allergy_pos = re.compile(
         r"\b(allerg(?:y|ic)|penicillin|sulfa|latex|nuts?|shellfish|kisi\s*se\s*allergy|"
         r"कोई\s*एलर्जी|allergy\s*hai)\b",
@@ -299,6 +375,16 @@ def _extract_allergies(text: str) -> Optional[ExtractedSlot]:
             confidence=0.82,
             evidence=m_pos.group(0),
         )
+    if target_slot == ClinicalSlot.ALLERGIES:
+        short_neg = re.compile(r"\b(?:no|none|nope|nothing|nahi|नहीं|kuch\s*nahi|koi\s*nahi)\b", re.I | re.U)
+        m_short = short_neg.search(text)
+        if m_short:
+            return ExtractedSlot(
+                slot=ClinicalSlot.ALLERGIES,
+                value="none",
+                confidence=0.85,
+                evidence=m_short.group(0),
+            )
     return None
 
 
@@ -341,7 +427,10 @@ def _extract_lifestyle(text: str) -> Optional[ExtractedSlot]:
 # Helper: family history
 # ---------------------------------------------------------------------------
 
-def _extract_family_history(text: str) -> Optional[ExtractedSlot]:
+def _extract_family_history(
+    text: str,
+    target_slot: Optional[ClinicalSlot] = None,
+) -> Optional[ExtractedSlot]:
     patterns = [
         re.compile(r"\b(family\s*history|parivaar\s*mein|परिवार\s*में|father|mother|"
                    r"baap|maa|pita|mata|uncle|aunt|sibling|bhai|behen)\b",
@@ -363,6 +452,16 @@ def _extract_family_history(text: str) -> Optional[ExtractedSlot]:
                 value=text.strip()[:80],  # keep first 80 chars as value
                 confidence=0.75,
                 evidence=matched,
+            )
+    if target_slot == ClinicalSlot.FAMILY_HISTORY:
+        short_neg = re.compile(r"\b(?:no|none|nope|nothing|no\s*family\s*history|parivaar\s*mein\s*koi\s*bimari\s*nahi|nahi|नहीं)\b", re.I | re.U)
+        m_short = short_neg.search(text)
+        if m_short:
+            return ExtractedSlot(
+                slot=ClinicalSlot.FAMILY_HISTORY,
+                value="none reported",
+                confidence=0.75,
+                evidence=m_short.group(0),
             )
     return None
 
@@ -388,7 +487,11 @@ class DeterministicRuleExtractor:
     can skip the chief complaint and avoid double-counting.
     """
 
-    def extract(self, text: str) -> ExtractionResult:
+    def extract(
+        self,
+        text: str,
+        target_slot: Optional[ClinicalSlot] = None,
+    ) -> ExtractionResult:
         """
         Extract clinical slots from *text*.
 
@@ -396,6 +499,8 @@ class DeterministicRuleExtractor:
         ----------
         text: str
             Transcribed patient utterance (Hindi, English, or Hinglish).
+        target_slot: Optional[ClinicalSlot]
+            Active slot being prompted by the planner, if any.
 
         Returns
         -------
@@ -406,11 +511,12 @@ class DeterministicRuleExtractor:
         slots: list[ExtractedSlot] = []
         chief_value: Optional[str] = None
 
-        # 1. Chief complaint
-        cc = _extract_chief_complaint(text)
-        if cc:
-            slots.append(cc)
-            chief_value = cc.value
+        # 1. Chief complaint (skip if target_slot is ASSOCIATED_SYMPTOMS to avoid stealing associated symptoms)
+        if target_slot != ClinicalSlot.ASSOCIATED_SYMPTOMS:
+            cc = _extract_chief_complaint(text)
+            if cc:
+                slots.append(cc)
+                chief_value = cc.value
 
         # 2. Duration (via utils)
         dur = parse_duration(text)
@@ -463,22 +569,22 @@ class DeterministicRuleExtractor:
             slots.append(agg)
 
         # 8. Past medical history
-        pmh = _extract_past_medical_history(text)
+        pmh = _extract_past_medical_history(text, target_slot=target_slot)
         if pmh:
             slots.append(pmh)
 
         # 9. Medications
-        meds = _extract_medications(text)
+        meds = _extract_medications(text, target_slot=target_slot)
         if meds:
             slots.append(meds)
 
         # 10. Allergies
-        alg = _extract_allergies(text)
+        alg = _extract_allergies(text, target_slot=target_slot)
         if alg:
             slots.append(alg)
 
         # 11. Family history
-        fh = _extract_family_history(text)
+        fh = _extract_family_history(text, target_slot=target_slot)
         if fh:
             slots.append(fh)
 

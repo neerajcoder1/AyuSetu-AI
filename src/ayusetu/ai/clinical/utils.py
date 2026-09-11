@@ -126,7 +126,7 @@ def parse_severity(text: str) -> Optional[Tuple[str, float]]:
             re.I | re.U), "very severe", 0.88),
         # Severe
         (re.compile(
-            r"\b(severe|bad|tez|तेज़?|zyada|ज़्यादा|बहुत दर्द)\b",
+            r"\b(severe|bad|badly|tez|तेज़?|zyada|ज़्यादा|बहुत दर्द)\b",
             re.I | re.U), "severe", 0.82),
         # Moderate
         (re.compile(
@@ -182,9 +182,20 @@ def parse_onset(text: str) -> Optional[Tuple[str, float]]:
     if m_ago:
         return m_ago.group(0), 0.90
 
-    # 3. Verb phrases with start/shuru (e.g. "shuru hui", "shuru hua", "started", "pehli baar")
+    # 3. Temporal phrases indicating start/onset: "last N days", "from last N days", "for the past N days", "since N days", "over the last N days", "in the last N days", "pichle N din"
+    since_last_pattern = re.compile(
+        r"\b(?:since|from\s+last|for\s+the\s+past|over\s+the\s+last|in\s+the\s+last|last|pichle|पिछले)\s+"
+        r"(?:(\d+|" + num_keys + r")\s+)?"
+        r"(घंटे?|ghante?|hours?|दिन|din|days?|हफ्ते?|हफ़्ते?|hafte?|weeks?|महीने?|mahine?|months?|साल|saal|years?)\b",
+        re.I | re.U,
+    )
+    m_since_last = since_last_pattern.search(text)
+    if m_since_last:
+        return m_since_last.group(0), 0.90
+
+    # 4. Verb/discovery phrases with onset indicator (e.g. "noticed", "first noticed", "first time", "started", "began", "appeared", "shuru", "pehli baar")
     start_pattern = re.compile(
-        r"\b(shuru\s*(?:hui|hua|huye|ho\s*gaya)?|शुरू\s*(?:हुआ|हुई|हो\s*गया)?|started?|first\s*started|pehli\s*baar|पहली\s*बार)\b",
+        r"\b(notice[ds]?|first\s*notice[ds]?|first\s*time|shuru\s*(?:hui|hua|huye|ho\s*gaya)?|शुरू\s*(?:हुआ|हुई|हो\s*गया)?|started?|first\s*started|began|first\s*began|appeared?|first\s*appeared|pehli\s*baar|पहली\s*बार)\b",
         re.I | re.U,
     )
     if start_pattern.search(text):
@@ -227,7 +238,7 @@ def parse_location(text: str) -> Optional[Tuple[str, float]]:
             re.I | re.U), "back", 0.88),
         # Throat / neck
         (re.compile(
-            r"\b(throat|gala|गला|neck|gardan|गर्दन)\b",
+            r"\b(throat|gala|gale|गला|neck|gardan|गर्दन)\b",
             re.I | re.U), "throat/neck", 0.88),
         # Joints / limbs (generic)
         (re.compile(

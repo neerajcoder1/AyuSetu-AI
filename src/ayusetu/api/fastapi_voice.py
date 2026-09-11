@@ -169,6 +169,12 @@ def turn(
     if result.get("response_audio") is not None:
         wav_bytes = _wav_bytes_from_numpy(result["response_audio"], result["response_sample_rate"])
         audio_b64 = base64.b64encode(wav_bytes).decode("utf-8")
+        import logging
+        logging.getLogger("ayusetu.api.fastapi_voice").info(
+            "[TTSDiag] WAV byte size: %d, WAV duration after encoding: %.3fs",
+            len(wav_bytes),
+            result.get("response_duration") or 0.0,
+        )
 
     # Retrieve session state for preferred language
     session_obj = voice_pipeline.get_session(session_id)
