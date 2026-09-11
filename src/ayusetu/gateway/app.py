@@ -9,17 +9,22 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from ayusetu.common.config import settings
+from ayusetu.common.structured_logging import configure_structured_logging
 from ayusetu.gateway.middleware.request_id import RequestIDMiddleware
 from ayusetu.gateway.middleware.security_headers import SecurityHeadersMiddleware
 from ayusetu.gateway.middleware.body_size_limit import BodySizeLimitMiddleware
 from ayusetu.gateway.middleware.rate_limit import RateLimitMiddleware
+from ayusetu.gateway.middleware.access_log import AccessLogMiddleware
 from ayusetu.gateway.middleware.error_handler import register_error_handlers
 from ayusetu.gateway.routes.health import router as health_router
+from ayusetu.gateway.routes.metrics import router as metrics_router
 from ayusetu.gateway.routes.v1_router import v1_router
 
 
 def create_gateway_app() -> FastAPI:
     """Factory creating configured API Gateway FastAPI application."""
+    configure_structured_logging(service_name="ayusetu-gateway", use_json=(settings.AYUSETU_ENV == "prod"))
+
     app = FastAPI(
         title="AyuSetu API Gateway",
         description="AyuSetu Clinical Intake & Security Perimeter Gateway",
@@ -45,10 +50,12 @@ def create_gateway_app() -> FastAPI:
     
     app.add_middleware(BodySizeLimitMiddleware)
     app.add_middleware(SecurityHeadersMiddleware)
+    app.add_middleware(AccessLogMiddleware)
     app.add_middleware(RequestIDMiddleware)
 
     # 3. Mount Routers
     app.include_router(health_router)
+    app.include_router(metrics_router)
     app.include_router(v1_router)
 
     @app.get("/")

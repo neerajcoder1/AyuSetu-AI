@@ -17,6 +17,8 @@ services:
       timeout: 5s
       retries: 5
       start_period: 5s
+    security_opt:
+      - no-new-privileges:true
 
   redis:
     image: redis:7-alpine
@@ -33,6 +35,8 @@ services:
       timeout: 5s
       retries: 5
       start_period: 3s
+    security_opt:
+      - no-new-privileges:true
 
   gateway:
     build:
@@ -59,6 +63,8 @@ services:
       timeout: 5s
       retries: 3
       start_period: 5s
+    security_opt:
+      - no-new-privileges:true
 
 volumes:
   postgres_data:

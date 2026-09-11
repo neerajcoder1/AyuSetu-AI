@@ -108,6 +108,14 @@ class Settings(BaseSettings):
                 raise ValueError("Default development database password 'ayusetu_dev_secret' is forbidden in production")
             if any("*" in origin for origin in self.CORS_ALLOWED_ORIGINS):
                 raise ValueError("Wildcard CORS origins are forbidden in production")
+            if self.SESSION_TTL_MINUTES <= 0 or self.SESSION_TTL_MINUTES > 120:
+                raise ValueError("SESSION_TTL_MINUTES must be between 1 and 120 minutes in production")
+            if self.RATE_LIMIT_DEVICE_RPM <= 0:
+                raise ValueError("RATE_LIMIT_DEVICE_RPM must be positive in production")
+            if not (self.DATABASE_URL.startswith("postgresql://") or self.DATABASE_URL.startswith("postgresql+psycopg2://")):
+                raise ValueError("PostgreSQL is mandatory in production environment (SQLite / fallback not permitted)")
+            if not (self.REDIS_URL.startswith("redis://") or self.REDIS_URL.startswith("rediss://")):
+                raise ValueError("Valid Redis URL is mandatory in production environment")
         return self
 
     @property
