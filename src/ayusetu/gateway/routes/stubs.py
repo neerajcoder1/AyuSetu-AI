@@ -272,20 +272,46 @@ def get_document_extraction(id: str, doc_id: str):
 
 
 @router.post("/sessions/{id}/submit", status_code=status.HTTP_202_ACCEPTED)
-def submit_session(id: str, payload: SubmitSessionRequest):
-    """Seal session, trigger summary generation, and purge session cache."""
-    session = session_cache.get_session(id)
-    if not session:
-        raise AyuSetuGatewayError(ErrorCode.SESSION_EXPIRED, "Session expired or not found", 401)
+def submit_session(
+    id: str,
+    payload: SubmitSessionRequest,
+    request: Request,
+):
+    """Seal session, persist Encounter/Slots to PostgreSQL, and purge session cache."""
+    from ayusetu.clinical.service import clinical_service
 
-    encounter_id = session.get("encounter_id", str(uuid6.uuid7()))
-    session_cache.panic_clear(id)
+    auth_header = request.headers.get("Authorization")
+    actor_id = None
+    actor_role = "patient"
+    if auth_header:
+        try:
+            principal = authenticator.authenticate_token(auth_header)
+            if principal and principal.is_authenticated:
+                actor_id = principal.actor_id
+                actor_role = principal.role.value
+        except Exception:
+            pass
+
+    ip = request.client.host if request.client else None
+
+    res = clinical_service.submit_session(
+        session_id=id,
+        confirmed_by=payload.confirmed_by,
+        readback_accepted=payload.readback_accepted,
+        actor_id=actor_id,
+        actor_role=actor_role,
+        ip_address=ip,
+    )
 
     return {
-        "encounter_id": encounter_id,
-        "summary_status": "generating",
-        "poll_after_ms": 1500,
-        "session_purged": True
+        "encounter_id": res.encounter_id,
+        "status": res.status,
+        "summary_status": res.summary_status,
+        "poll_after_ms": res.poll_after_ms,
+        "session_purged": res.session_purged,
+        "slots_persisted": res.slots_persisted,
+        "utterances_persisted": res.utterances_persisted,
+        "redflags_detected": res.redflags_detected,
     }
 
 
