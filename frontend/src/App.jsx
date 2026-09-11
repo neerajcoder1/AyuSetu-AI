@@ -10,6 +10,7 @@ export default function App() {
   const [preferredLanguage, setPreferredLanguage] = useState('hinglish');
   const [dialogueState, setDialogueState] = useState(null);
   const [redFlags, setRedFlags] = useState([]);
+  const [sessionDocuments, setSessionDocuments] = useState([]);
   const [isConnected, setIsConnected] = useState(false);
   const [isCreatingSession, setIsCreatingSession] = useState(false);
 
@@ -24,6 +25,7 @@ export default function App() {
       const stateRes = await api.getSessionState(res.session_id);
       setDialogueState(stateRes.state || null);
       setRedFlags([]);
+      setSessionDocuments([]);
     } catch (err) {
       console.error('Failed to create session:', err);
       setIsConnected(false);
@@ -67,6 +69,13 @@ export default function App() {
     }
   };
 
+  const handleDocumentProcessed = (docRes) => {
+    if (docRes) {
+      setSessionDocuments((prev) => [...prev, docRes]);
+    }
+    refreshSessionState();
+  };
+
   // Called after a voice turn finishes
   const handleTurnCompleted = (turnResponse) => {
     if (turnResponse.preferred_language) {
@@ -106,6 +115,8 @@ export default function App() {
             onLanguageChange={handleLanguageChange}
             onTurnCompleted={handleTurnCompleted}
             onGoToDoctorDashboard={() => setActiveTab('doctor')}
+            sessionDocuments={sessionDocuments}
+            onDocumentProcessed={handleDocumentProcessed}
           />
         ) : (
           <DoctorDashboardScreen
@@ -113,9 +124,12 @@ export default function App() {
             dialogueState={dialogueState}
             redFlags={redFlags}
             onRefreshSessionState={refreshSessionState}
+            sessionDocuments={sessionDocuments}
+            onDocumentProcessed={handleDocumentProcessed}
           />
         )}
       </main>
     </div>
   );
 }
+

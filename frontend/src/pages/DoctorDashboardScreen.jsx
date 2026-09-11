@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Stethoscope, FileText, Sparkles, Upload, ShieldCheck, AlertCircle, RefreshCw, Layers } from 'lucide-react';
+import { Stethoscope, FileText, Sparkles, Upload, ShieldCheck, AlertCircle, RefreshCw, Layers, CheckCircle2, UserCheck } from 'lucide-react';
 import RedFlagAlertPanel from '../components/RedFlagAlertPanel';
 import ClinicalTimelineWidget from '../components/ClinicalTimelineWidget';
 import DocumentUploadModal from '../components/DocumentUploadModal';
@@ -11,13 +11,15 @@ export default function DoctorDashboardScreen({
   dialogueState,
   redFlags = [],
   onRefreshSessionState,
+  sessionDocuments = [],
+  onDocumentProcessed: parentOnDocumentProcessed,
 }) {
   const [summary, setSummary] = useState(null);
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
   const [isDocModalOpen, setIsDocModalOpen] = useState(false);
   const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
   const [timelineRefreshKey, setTimelineRefreshKey] = useState(0);
-  const [documentEntities, setDocumentEntities] = useState([]);
+  const [localDocumentEntities, setLocalDocumentEntities] = useState([]);
   const [error, setError] = useState(null);
 
   // Generate Summary
@@ -42,9 +44,10 @@ export default function DoctorDashboardScreen({
 
   const handleDocumentProcessed = (docRes) => {
     if (docRes && docRes.entities) {
-      setDocumentEntities((prev) => [...prev, ...docRes.entities]);
+      setLocalDocumentEntities((prev) => [...prev, ...docRes.entities]);
     }
     setTimelineRefreshKey((prev) => prev + 1);
+    if (parentOnDocumentProcessed) parentOnDocumentProcessed(docRes);
     if (onRefreshSessionState) onRefreshSessionState();
   };
 
@@ -54,6 +57,10 @@ export default function DoctorDashboardScreen({
   };
 
   const collectedInfo = dialogueState?.collected_info || {};
+
+  // Group documents by role
+  const patientDocs = sessionDocuments.filter((d) => d.uploaderRole === 'patient' || d.confirmedByPatient);
+  const physicianDocs = sessionDocuments.filter((d) => d.uploaderRole === 'physician');
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
@@ -79,9 +86,10 @@ export default function DoctorDashboardScreen({
           <button
             onClick={() => setIsDocModalOpen(true)}
             className="flex items-center space-x-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs px-3.5 py-2.5 rounded-xl transition-all"
+            title="Upload physician supporting document"
           >
             <Upload className="w-4 h-4 text-sky-400" />
-            <span>Upload Document</span>
+            <span>Upload Supporting Document</span>
           </button>
 
           <button
@@ -159,37 +167,124 @@ export default function DoctorDashboardScreen({
           <ClinicalTimelineWidget sessionId={sessionId} refreshTrigger={timelineRefreshKey} />
         </div>
 
-        {/* Right 4 Cols: Document Entities & Review Summary Preview */}
+        {/* Right 4 Cols: Document AI & Role Separation */}
         <div className="lg:col-span-4 space-y-6">
-          {/* Extracted Document Entities */}
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-3">
+          {/* Patient Medical Documents & OCR Extracted Information Card */}
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-4">
             <div className="flex items-center justify-between pb-2 border-b border-slate-100">
               <div className="flex items-center space-x-2">
                 <Layers className="w-4 h-4 text-sky-600" />
-                <h3 className="font-semibold text-slate-900 text-sm">Document AI Entities</h3>
+                <h3 className="font-semibold text-slate-900 text-sm">Patient Documents & OCR</h3>
               </div>
               <span className="text-[10px] bg-sky-100 text-sky-800 font-bold px-2 py-0.5 rounded-full">
-                {documentEntities.length} Total
+                {sessionDocuments.length} Document{sessionDocuments.length === 1 ? '' : 's'}
               </span>
             </div>
 
-            {documentEntities.length === 0 ? (
-              <div className="text-center py-6 text-slate-400 text-xs italic bg-slate-50 rounded-xl">
-                No documents uploaded for OCR processing in this session.
+            {/* Section 1: Patient Uploaded Documents (Prioritized) */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center space-x-1">
+                  <UserCheck className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Patient Documents</span>
+                </span>
+                <span className="text-[10px] text-slate-400">{patientDocs.length} File(s)</span>
               </div>
-            ) : (
-              <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-                {documentEntities.map((ent, idx) => (
-                  <div key={idx} className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs space-y-1">
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-[10px] uppercase bg-sky-100 text-sky-800 px-1.5 py-0.5 rounded">
-                        {ent.entity_type}
-                      </span>
+
+              {patientDocs.length === 0 ? (
+                <div className="text-center py-4 text-slate-400 text-xs italic bg-slate-50 rounded-xl">
+                  No patient documents uploaded for this session yet.
+                </div>
+              ) : (
+                <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                  {patientDocs.map((doc, idx) => (
+                    <div key={idx} className="p-3 bg-emerald-50/50 border border-emerald-200 rounded-xl text-xs space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-slate-900 flex items-center space-x-1">
+                          <FileText className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>{doc.filename}</span>
+                        </span>
+                        <span className="text-[10px] bg-emerald-200 text-emerald-900 font-bold px-1.5 py-0.5 rounded">
+                          Patient Uploaded
+                        </span>
+                      </div>
+
+                      {/* OCR Extracted Information Label & List */}
+                      {doc.entities && doc.entities.length > 0 && (
+                        <div className="space-y-1">
+                          <span className="text-[10px] font-bold text-slate-600 uppercase block">
+                            OCR Extracted Information:
+                          </span>
+                          <div className="space-y-1">
+                            {doc.entities.map((ent, ei) => (
+                              <div key={ei} className="p-1.5 bg-white border border-slate-200 rounded-lg flex items-center justify-between text-[11px]">
+                                <span className="font-bold text-[9px] uppercase bg-sky-100 text-sky-800 px-1 py-0.5 rounded">
+                                  {ent.entity_type}
+                                </span>
+                                <span className="font-medium text-slate-800 truncate ml-1">{ent.raw_text}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Section 2: Physician Uploaded Supporting Documents (Optional Secondary) */}
+            {physicianDocs.length > 0 && (
+              <div className="pt-2 border-t border-slate-100 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                    Physician Supporting Documents
+                  </span>
+                  <span className="text-[10px] text-slate-400">{physicianDocs.length} File(s)</span>
+                </div>
+                <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
+                  {physicianDocs.map((doc, idx) => (
+                    <div key={idx} className="p-2.5 bg-purple-50/50 border border-purple-200 rounded-xl text-xs space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-slate-900">{doc.filename}</span>
+                        <span className="text-[10px] bg-purple-200 text-purple-900 font-bold px-1.5 py-0.5 rounded">
+                          Physician Uploaded
+                        </span>
+                      </div>
+                      {doc.entities && doc.entities.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {doc.entities.map((e, ei) => (
+                            <span key={ei} className="text-[9px] bg-white border border-slate-200 px-1.5 py-0.5 rounded text-slate-700">
+                              <strong className="text-purple-700 uppercase">{e.entity_type}:</strong> {e.raw_text}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* General Extracted Entities Fallback (if any raw entities exist from backend API) */}
+            {localDocumentEntities.length > 0 && sessionDocuments.length === 0 && (
+              <div className="pt-2 border-t border-slate-100 space-y-2">
+                <span className="text-xs font-bold text-slate-700 uppercase tracking-wider block">
+                  OCR Extracted Information
+                </span>
+                <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                  {localDocumentEntities.map((ent, idx) => (
+                    <div key={idx} className="p-2 bg-slate-50 border border-slate-200 rounded-lg text-xs flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <span className="font-bold text-[10px] uppercase bg-sky-100 text-sky-800 px-1 py-0.5 rounded">
+                          {ent.entity_type}
+                        </span>
+                        <span className="font-medium text-slate-800">{ent.raw_text}</span>
+                      </div>
                       <span className="text-[10px] text-slate-400">P.{ent.page_no}</span>
                     </div>
-                    <p className="font-medium text-slate-800">{ent.raw_text}</p>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
             )}
           </div>
@@ -214,12 +309,13 @@ export default function DoctorDashboardScreen({
         </div>
       </div>
 
-      {/* Document Upload Modal */}
+      {/* Document Upload Modal for Physician */}
       <DocumentUploadModal
         sessionId={sessionId}
         isOpen={isDocModalOpen}
         onClose={() => setIsDocModalOpen(false)}
         onDocumentProcessed={handleDocumentProcessed}
+        uploaderRole="physician"
       />
 
       {/* Summary Review Modal */}
@@ -233,3 +329,4 @@ export default function DoctorDashboardScreen({
     </div>
   );
 }
+

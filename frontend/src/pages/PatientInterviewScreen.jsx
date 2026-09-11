@@ -1,7 +1,8 @@
 import React, { useState, useRef } from 'react';
-import { Bot, User, Volume2, ArrowRight, MessageSquare, AlertCircle, Globe } from 'lucide-react';
+import { Bot, User, Volume2, ArrowRight, MessageSquare, AlertCircle, Globe, FileText, Upload, CheckCircle2, ShieldCheck } from 'lucide-react';
 import AudioRecorder from '../components/AudioRecorder';
 import SlotChecklist from '../components/SlotChecklist';
+import DocumentUploadModal from '../components/DocumentUploadModal';
 import { api } from '../services/api';
 
 export default function PatientInterviewScreen({
@@ -11,12 +12,15 @@ export default function PatientInterviewScreen({
   onLanguageChange,
   onTurnCompleted,
   onGoToDoctorDashboard,
+  sessionDocuments = [],
+  onDocumentProcessed,
 }) {
   const [turns, setTurns] = useState([]);
   const [isSendingTurn, setIsSendingTurn] = useState(false);
   const [lowConfidenceWarning, setLowConfidenceWarning] = useState(false);
   const [playingAudioIndex, setPlayingAudioIndex] = useState(null);
   const [autoPlayNotice, setAutoPlayNotice] = useState(null);
+  const [isDocModalOpen, setIsDocModalOpen] = useState(false);
   const [error, setError] = useState(null);
 
   const currentAudioRef = useRef(null);
@@ -237,6 +241,8 @@ export default function PatientInterviewScreen({
     }
   };
 
+  const patientDocs = sessionDocuments.filter((d) => d.uploaderRole === 'patient' || d.confirmedByPatient);
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
       {/* Intro Banner */}
@@ -295,6 +301,69 @@ export default function PatientInterviewScreen({
             </button>
           ))}
         </div>
+      </div>
+
+      {/* Medical Document Upload Card for Patient */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-3">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div className="flex items-center space-x-3">
+            <div className="p-2.5 bg-sky-100 text-sky-700 rounded-xl">
+              <FileText className="w-5 h-5" />
+            </div>
+            <div>
+              <h4 className="font-bold text-slate-900 text-xs sm:text-sm">Upload Medical Document</h4>
+              <p className="text-[11px] text-slate-500">
+                Have lab reports, prescriptions, or medical records? Automated OCR will scan and extract findings for doctor review.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setIsDocModalOpen(true)}
+            className="flex items-center space-x-1.5 bg-sky-600 hover:bg-sky-700 text-white font-bold text-xs px-3.5 py-2 rounded-xl transition-all shadow-sm shrink-0"
+          >
+            <Upload className="w-3.5 h-3.5" />
+            <span>Upload Medical Document</span>
+          </button>
+        </div>
+
+        {/* Display Patient Uploaded Documents list if available */}
+        {patientDocs.length > 0 && (
+          <div className="pt-2 border-t border-slate-100 space-y-2">
+            <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block">
+              Attached Medical Documents ({patientDocs.length})
+            </span>
+            <div className="space-y-2">
+              {patientDocs.map((doc, idx) => (
+                <div key={idx} className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-slate-800 flex items-center space-x-1.5">
+                      <FileText className="w-3.5 h-3.5 text-sky-600" />
+                      <span>{doc.filename}</span>
+                    </span>
+                    <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full flex items-center space-x-1">
+                      <CheckCircle2 className="w-3 h-3" />
+                      <span>Confirmed for Doctor Review</span>
+                    </span>
+                  </div>
+                  {doc.entities && doc.entities.length > 0 && (
+                    <div className="mt-1 pt-1 border-t border-slate-200/60">
+                      <span className="text-[10px] font-bold text-slate-500 uppercase block mb-1">
+                        OCR Extracted Information:
+                      </span>
+                      <div className="flex flex-wrap gap-1">
+                        {doc.entities.map((e, ei) => (
+                          <span key={ei} className="px-2 py-0.5 bg-white border border-slate-200 text-[10px] text-slate-700 rounded-md">
+                            <strong className="text-sky-700 uppercase">{e.entity_type}:</strong> {e.raw_text}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {error && (
@@ -407,6 +476,15 @@ export default function PatientInterviewScreen({
           <SlotChecklist dialogueState={dialogueState} />
         </div>
       </div>
+
+      {/* Patient Document Upload Modal */}
+      <DocumentUploadModal
+        sessionId={sessionId}
+        isOpen={isDocModalOpen}
+        onClose={() => setIsDocModalOpen(false)}
+        onDocumentProcessed={onDocumentProcessed}
+        uploaderRole="patient"
+      />
     </div>
   );
 }
