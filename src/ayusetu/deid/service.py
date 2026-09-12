@@ -50,6 +50,36 @@ class DeidExportService:
         self._audit_service = audit_service
         self._consent_service = consent_service
         self._safety_gate = safety_gate or default_safety_gate
+        self._jobs: Dict[str, Dict[str, Any]] = {}
+
+    def get_job(self, export_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieve export job state by export ID."""
+        return self._jobs.get(export_id)
+
+    def register_job(self, export_id: str, job_data: Dict[str, Any]) -> None:
+        """Register or update an export job in the registry."""
+        self._jobs[export_id] = job_data
+
+    def get_download_bundle(self, export_id: str) -> Dict[str, Any]:
+        """Fetch sanitized download bundle for an approved completed export."""
+        job = self._jobs.get(export_id)
+        if not job:
+            raise AyuSetuGatewayError(
+                ErrorCode.NOT_FOUND,
+                f"Export job '{export_id}' not found",
+                404,
+            )
+        if job.get("status") != "completed":
+            raise AyuSetuGatewayError(
+                ErrorCode.POLICY_DENIED,
+                f"Export job '{export_id}' is not yet completed (current status: {job.get('status')})",
+                400,
+            )
+        return job.get("bundle", {})
+
+    def clear(self) -> None:
+        """Clear job store for testing."""
+        self._jobs.clear()
 
     @property
     def audit_service(self) -> AuditService:

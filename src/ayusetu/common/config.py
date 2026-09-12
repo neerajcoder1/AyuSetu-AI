@@ -87,6 +87,7 @@ class Settings(BaseSettings):
     SERVICE_DEID_URL: str = Field(default="http://localhost:8110")
 
     # --- Security & Network ---
+    JWT_SECRET_KEY: str = Field(default="ayusetu-jwt-secret-key-m8-secure-token", description="JWT / HMAC signing secret")
     MTLS_CA_BUNDLE: Optional[str] = None
     REQUEST_SIGNING_PUBKEYS: Optional[str] = None
     EGRESS_ALLOWLIST: Optional[str] = None
