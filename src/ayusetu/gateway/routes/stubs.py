@@ -420,27 +420,39 @@ def acknowledge_alert(id: str, payload: AlertAcknowledgeRequest):
 
 
 @router.post("/terminology/$translate", status_code=status.HTTP_200_OK)
-def translate_terminology(code: str, system: str = "NAMASTE"):
-    """NAMASTE to ICD-11 TM2/MMS translation."""
-    return {
-        "source_code": code,
-        "source_system": system,
-        "matches": [
-            {"system": "ICD-11 TM2", "code": "SK25", "display": "Amlapitta (TM2)", "confidence": 0.85}
-        ]
-    }
+def translate_terminology(
+    code: str,
+    system: str = "NAMASTE",
+    target_system: Optional[str] = None,
+):
+    """NAMASTE to ICD-11 TM2/MMS and LOINC dual-coding translation."""
+    from ayusetu.clinical.terminology import terminology_service
+    return terminology_service.translate(code=code, system=system, target_system=target_system)
 
 
 @router.get("/terminology/interactions", status_code=status.HTTP_200_OK)
 def check_interactions(drugs: List[str] = Query(...)):
     """Herb-drug and drug-drug interaction check."""
-    return {"checked_drugs": drugs, "interactions": []}
+    from ayusetu.clinical.terminology import terminology_service
+    return terminology_service.check_interactions(drugs=drugs)
 
 
-@router.get("/encounters/{id}/prior", status_code=status.HTTP_200_OK)
-def get_prior_records(id: str):
-    """Fetch prior records via ABDM M3 / local history."""
-    return {"encounter_id": id, "records": []}
+@router.get(
+    "/encounters/{id}/prior",
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(require_roles(Role.PHYSICIAN, Role.NURSE, Role.MRD))]
+)
+def get_prior_records(
+    id: str,
+    principal: Principal = Depends(get_current_principal),
+):
+    """Fetch prior records and longitudinal patient timeline."""
+    from ayusetu.clinical.terminology import terminology_service
+    return terminology_service.get_prior_records(
+        encounter_id=id,
+        actor_id=principal.actor_id if principal else None,
+        actor_role=principal.role.value if principal else "physician",
+    )
 
 
 @router.post("/sessions/{id}/resume", status_code=status.HTTP_200_OK)
