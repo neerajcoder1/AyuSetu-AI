@@ -333,33 +333,8 @@ def panic_clear_session(id: str):
 )
 def get_encounter_summary(id: str):
     """Fetch physician-facing clinical summary with provenance citations."""
-    return {
-        "status": "preliminary",
-        "encounter_id": id,
-        "model_version": "ayusetu-sum-1.2",
-        "sections": [
-            {
-                "id": "hpi",
-                "title": "History of Present Illness",
-                "clauses": [
-                    {
-                        "text": "Epigastric pain for three months, worse after meals.",
-                        "slots": ["hpi.site", "hpi.duration", "hpi.aggravating"],
-                        "source": {"type": "utterance", "ids": ["u-12", "u-14"]},
-                        "confidence": 0.91,
-                        "elicited": True
-                    }
-                ]
-            },
-            {
-                "id": "allergy",
-                "title": "Allergies",
-                "clauses": [{"text": "Not elicited", "elicited": False}]
-            }
-        ],
-        "alerts": [],
-        "coding": [{"system": "NAMASTE", "code": "AAE-16", "confidence": 0.81}]
-    }
+    from ayusetu.clinical.service import clinical_service
+    return clinical_service.get_or_generate_summary(id)
 
 
 @router.patch(

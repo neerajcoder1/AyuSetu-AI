@@ -1,7 +1,7 @@
 """
 AyuSetu Clinical Domain Models & DTOs
 =====================================
-Authoritative schemas for Encounter, Slot, and Utterance lifecycle per PRD v2.0 §10, §14, §22.3 & §22.5.
+Authoritative schemas for Encounter, Slot, Utterance, and Summary lifecycle per PRD v2.0 §10, §14, §22.3 & §22.5.
 """
 
 from datetime import datetime, timezone
@@ -18,6 +18,11 @@ class EncounterStatus(str, Enum):
     PRELIMINARY = "preliminary"
     FINAL = "final"
     ABANDONED = "abandoned"
+
+
+class SummaryStatus(str, Enum):
+    PRELIMINARY = "preliminary"
+    FINAL = "final"
 
 
 class VisitType(str, Enum):
@@ -99,6 +104,47 @@ class SlotDTO(BaseModel):
     source_ref: Optional[str] = None
     reported_by: ReportedBy = Field(default=ReportedBy.PATIENT)
     elicited: bool = Field(default=True, description="False indicates explicit absence/unelicited, never assumed negative")
+
+
+class SummaryClause(BaseModel):
+    text: str
+    slots: List[str] = Field(default_factory=list)
+    source: Optional[Dict[str, Any]] = None
+    confidence: float = 1.0
+    elicited: bool = True
+
+
+class SummarySection(BaseModel):
+    id: str
+    title: str
+    clauses: List[SummaryClause] = Field(default_factory=list)
+
+
+class ClinicalSummaryDTO(BaseModel):
+    """Structured clinical summary matching packages/schemas/summary.json."""
+    encounter_id: str
+    version: int = 1
+    status: SummaryStatus = SummaryStatus.PRELIMINARY
+    model_version: str = "ayusetu-synthesis-v1.0"
+    sections: List[SummarySection] = Field(default_factory=list)
+    alerts: List[Dict[str, Any]] = Field(default_factory=list)
+    coding: List[Dict[str, Any]] = Field(default_factory=list)
+    signed_by: Optional[str] = None
+    signed_at: Optional[datetime] = None
+
+
+class SummaryVersionDTO(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    id: str = Field(default_factory=lambda: str(uuid6.uuid7()))
+    encounter_id: str
+    version: int = 1
+    composition: Dict[str, Any]
+    generated_by: str = "synthesis_engine"
+    model_version: str = "ayusetu-synthesis-v1.0"
+    status: SummaryStatus = SummaryStatus.PRELIMINARY
+    signed_by: Optional[str] = None
+    signed_at: Optional[datetime] = None
 
 
 class SessionSubmissionRequest(BaseModel):

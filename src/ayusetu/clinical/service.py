@@ -28,7 +28,10 @@ from ayusetu.clinical.models import (
     SlotDTO,
     UtteranceDTO,
     SessionSubmissionResponse,
+    SummaryVersionDTO,
+    SummaryStatus,
 )
+from ayusetu.clinical.summary_engine import summary_synthesis_engine
 from ayusetu.clinical.repository import ClinicalRepository
 
 logger = logging.getLogger("ayusetu.clinical.service")
@@ -255,7 +258,13 @@ class ClinicalService:
         except Exception as audit_err:
             logger.error("Audit log error on encounter submission: %s", str(audit_err))
 
-        # 9. Invalidate and purge transient session cache (<2s)
+        # 9. Generate Preliminary Summary Version 1
+        try:
+            self.generate_summary(enc_id, actor_id=actor_id, actor_role=actor_role)
+        except Exception as sum_err:
+            logger.warning("Preliminary summary synthesis deferred/failed during submission: %s", str(sum_err))
+
+        # 10. Invalidate and purge transient session cache (<2s)
         self.session_cache.panic_clear(session_id)
 
         return SessionSubmissionResponse(
@@ -268,6 +277,88 @@ class ClinicalService:
             utterances_persisted=len(utterance_dtos),
             redflags_detected=redflags_detected,
         )
+
+    def generate_summary(
+        self,
+        encounter_id: str,
+        actor_id: Optional[str] = None,
+        actor_role: str = "system",
+    ) -> SummaryVersionDTO:
+        """
+        Synthesize deterministic clinical summary from persisted Slot records
+        and idempotently persist as SummaryVersion (version=1, status=preliminary).
+        """
+        enc = self.repository.get_encounter(encounter_id)
+        if not enc:
+            raise AyuSetuGatewayError(
+                ErrorCode.NOT_FOUND,
+                f"Encounter '{encounter_id}' not found",
+                404,
+            )
+
+        # Check consent if encounter has consent recorded
+        from ayusetu.consent.models import ConsentStatus
+        active_consent = consent_service.get_active_consent(encounter_id)
+        if active_consent is not None:
+            if not active_consent.purposes.get("clinical", False) or active_consent.status != ConsentStatus.ACTIVE:
+                raise AyuSetuGatewayError(
+                    ErrorCode.CONSENT_REQUIRED,
+                    f"Active clinical consent required for summary generation on encounter '{encounter_id}'",
+                    403,
+                )
+
+        slots = self.repository.get_slots(encounter_id)
+        summary_dto = summary_synthesis_engine.synthesize(
+            encounter_id=encounter_id,
+            slots=slots,
+        )
+
+        composition_dict = summary_dto.model_dump(mode="json")
+        saved_summary = self.repository.upsert_preliminary_summary(
+            encounter_id=encounter_id,
+            composition=composition_dict,
+            model_version=summary_synthesis_engine.MODEL_VERSION,
+            generated_by="synthesis_engine",
+        )
+        return saved_summary
+
+    def get_or_generate_summary(
+        self,
+        encounter_id: str,
+        actor_id: Optional[str] = None,
+        actor_role: str = "doctor",
+    ) -> Dict[str, Any]:
+        """
+        Retrieve latest summary composition or synthesize preliminary summary version 1.
+        Preserves RBAC/ABAC and clinical consent enforcement.
+        """
+        # Check if summary version already exists
+        existing = self.repository.get_latest_summary_version(encounter_id)
+        if existing:
+            return existing.composition
+
+        # Check if encounter exists
+        enc = self.repository.get_encounter(encounter_id)
+        if not enc:
+            # Check if encounter_id is valid UUID
+            try:
+                uuid.UUID(str(encounter_id))
+            except Exception:
+                raise AyuSetuGatewayError(
+                    ErrorCode.UNPROCESSABLE_ENTITY,
+                    f"Invalid encounter ID format: '{encounter_id}'",
+                    422,
+                )
+            # Synthesize fallback unelicited summary
+            summary_dto = summary_synthesis_engine.synthesize(
+                encounter_id=encounter_id,
+                slots=[],
+            )
+            return summary_dto.model_dump(mode="json")
+
+        # Generate and persist summary version
+        saved = self.generate_summary(encounter_id, actor_id=actor_id, actor_role=actor_role)
+        return saved.composition
 
 
 # Global Singleton

@@ -2,8 +2,9 @@
 Clinical PostgreSQL Repository
 ==============================
 Thread-safe and process-safe repository managing authoritative Encounter,
-Slot, and Utterance records in PostgreSQL per PRD v2.0 §10, §14, §22.3 & §22.5.
-Enforces transactional integrity, atomic session submission, and deterministic slot conflict resolution.
+Slot, Utterance, and SummaryVersion records in PostgreSQL per PRD v2.0 §10, §14, §22.3 & §22.5.
+Enforces transactional integrity, atomic session submission, deterministic slot conflict resolution,
+and idempotent summary versioning.
 """
 
 from datetime import datetime, timezone
@@ -16,7 +17,7 @@ from sqlalchemy import create_engine, func, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from ayusetu.common.database import SyncSessionLocal, sync_engine, Base
-from ayusetu.common.models import Patient, Encounter, Slot, Utterance
+from ayusetu.common.models import Patient, Encounter, Slot, Utterance, SummaryVersion
 from ayusetu.clinical.models import (
     EncounterDTO,
     EncounterStatus,
@@ -27,6 +28,8 @@ from ayusetu.clinical.models import (
     SlotSource,
     SlotDTO,
     UtteranceDTO,
+    SummaryStatus,
+    SummaryVersionDTO,
 )
 
 logger = logging.getLogger("ayusetu.clinical.repository")
@@ -55,6 +58,7 @@ def get_default_session_factory() -> sessionmaker:
                     Encounter.__table__,
                     Slot.__table__,
                     Utterance.__table__,
+                    SummaryVersion.__table__,
                 ]
             )
             _DEFAULT_SESSION_FACTORY = SyncSessionLocal
@@ -72,6 +76,7 @@ def get_default_session_factory() -> sessionmaker:
                     Encounter.__table__,
                     Slot.__table__,
                     Utterance.__table__,
+                    SummaryVersion.__table__,
                 ],
             )
             _DEFAULT_SESSION_FACTORY = sessionmaker(
@@ -153,6 +158,24 @@ def _row_to_utterance_dto(row: Utterance) -> UtteranceDTO:
     )
 
 
+def _row_to_summary_version_dto(row: SummaryVersion) -> SummaryVersionDTO:
+    """Map SQLAlchemy SummaryVersion row to SummaryVersionDTO."""
+    signed_by_str = str(row.signed_by) if row.signed_by else None
+    signed_at_dt = format_utc_dt(row.signed_at) if row.signed_at else None
+    composition_dict = dict(row.composition) if isinstance(row.composition, dict) else row.composition
+    return SummaryVersionDTO(
+        id=str(row.id),
+        encounter_id=str(row.encounter_id),
+        version=row.version,
+        composition=composition_dict,
+        generated_by=row.generated_by,
+        model_version=row.model_version,
+        status=SummaryStatus(row.status) if row.status in SummaryStatus._value2member_map_ else SummaryStatus.PRELIMINARY,
+        signed_by=signed_by_str,
+        signed_at=signed_at_dt,
+    )
+
+
 # Valid state transitions for encounter
 VALID_ENCOUNTER_TRANSITIONS = {
     EncounterStatus.DRAFT: {EncounterStatus.SUBMITTED, EncounterStatus.ABANDONED},
@@ -165,7 +188,7 @@ VALID_ENCOUNTER_TRANSITIONS = {
 
 class ClinicalRepository:
     """
-    Authoritative PostgreSQL-backed repository for Encounter, Slot, and Utterance models.
+    Authoritative PostgreSQL-backed repository for Encounter, Slot, Utterance, and SummaryVersion models.
     """
     _lock = threading.Lock()
 
@@ -497,6 +520,111 @@ class ClinicalRepository:
                     logger.error("Failed atomic encounter submission for encounter %s", encounter.id)
                     raise
 
+    def save_summary_version(self, summary_version: SummaryVersionDTO) -> SummaryVersionDTO:
+        """Persist a new SummaryVersion in PostgreSQL."""
+        sum_uuid = uuid.UUID(str(summary_version.id))
+        enc_uuid = uuid.UUID(str(summary_version.encounter_id))
+        signed_by_uuid = uuid.UUID(str(summary_version.signed_by)) if summary_version.signed_by else None
+        signed_at_dt = format_utc_dt(summary_version.signed_at) if summary_version.signed_at else None
+
+        with self._lock:
+            with self._session_factory() as db:
+                try:
+                    row = SummaryVersion(
+                        id=sum_uuid,
+                        encounter_id=enc_uuid,
+                        version=summary_version.version,
+                        composition=summary_version.composition,
+                        generated_by=summary_version.generated_by,
+                        model_version=summary_version.model_version,
+                        status=summary_version.status.value,
+                        signed_by=signed_by_uuid,
+                        signed_at=signed_at_dt,
+                    )
+                    db.add(row)
+                    db.commit()
+                    db.refresh(row)
+                    return _row_to_summary_version_dto(row)
+                except Exception:
+                    db.rollback()
+                    raise
+
+    def get_summary_version(self, encounter_id: str, version: int = 1) -> Optional[SummaryVersionDTO]:
+        """Retrieve a specific summary version for an encounter."""
+        enc_uuid = uuid.UUID(str(encounter_id))
+        with self._session_factory() as db:
+            row = (
+                db.query(SummaryVersion)
+                .filter(SummaryVersion.encounter_id == enc_uuid, SummaryVersion.version == version)
+                .first()
+            )
+            if not row:
+                return None
+            return _row_to_summary_version_dto(row)
+
+    def get_latest_summary_version(self, encounter_id: str) -> Optional[SummaryVersionDTO]:
+        """Retrieve the latest summary version for an encounter."""
+        enc_uuid = uuid.UUID(str(encounter_id))
+        with self._session_factory() as db:
+            row = (
+                db.query(SummaryVersion)
+                .filter(SummaryVersion.encounter_id == enc_uuid)
+                .order_by(SummaryVersion.version.desc())
+                .first()
+            )
+            if not row:
+                return None
+            return _row_to_summary_version_dto(row)
+
+    def upsert_preliminary_summary(
+        self,
+        encounter_id: str,
+        composition: Dict[str, Any],
+        model_version: str = "ayusetu-synthesis-v1.0",
+        generated_by: str = "synthesis_engine",
+    ) -> SummaryVersionDTO:
+        """
+        Idempotently create or update preliminary summary version 1 for an encounter.
+        Prevents uncontrolled duplicate version 1 records.
+        """
+        enc_uuid = uuid.UUID(str(encounter_id))
+        with self._lock:
+            with self._session_factory() as db:
+                try:
+                    existing = (
+                        db.query(SummaryVersion)
+                        .filter(SummaryVersion.encounter_id == enc_uuid, SummaryVersion.version == 1)
+                        .with_for_update()
+                        .first()
+                    )
+                    if existing:
+                        if existing.status == SummaryStatus.FINAL.value:
+                            # Do not overwrite signed final summary
+                            return _row_to_summary_version_dto(existing)
+                        existing.composition = composition
+                        existing.model_version = model_version
+                        existing.generated_by = generated_by
+                        db.commit()
+                        db.refresh(existing)
+                        return _row_to_summary_version_dto(existing)
+                    else:
+                        new_row = SummaryVersion(
+                            id=uuid.uuid4(),
+                            encounter_id=enc_uuid,
+                            version=1,
+                            composition=composition,
+                            generated_by=generated_by,
+                            model_version=model_version,
+                            status=SummaryStatus.PRELIMINARY.value,
+                        )
+                        db.add(new_row)
+                        db.commit()
+                        db.refresh(new_row)
+                        return _row_to_summary_version_dto(new_row)
+                except Exception:
+                    db.rollback()
+                    raise
+
     def count_encounters(self) -> int:
         """Count total encounters."""
         with self._session_factory() as db:
@@ -507,11 +635,17 @@ class ClinicalRepository:
         with self._session_factory() as db:
             return db.query(func.count(Slot.id)).scalar() or 0
 
+    def count_summaries(self) -> int:
+        """Count total summary versions."""
+        with self._session_factory() as db:
+            return db.query(func.count(SummaryVersion.id)).scalar() or 0
+
     def clear_for_testing(self) -> None:
         """Reset clinical tables for test isolation."""
         with self._lock:
             with self._session_factory() as db:
                 try:
+                    db.query(SummaryVersion).delete()
                     db.query(Slot).delete()
                     db.query(Utterance).delete()
                     db.query(Encounter).delete()
