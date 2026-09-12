@@ -386,21 +386,17 @@ def sign_encounter_summary(
     status_code=status.HTTP_200_OK,
     dependencies=[Depends(require_roles(Role.PHYSICIAN, Role.MRD))]
 )
-def get_encounter_fhir(id: str):
+def get_encounter_fhir(
+    id: str,
+    principal: Principal = Depends(get_current_principal),
+):
     """Retrieve FHIR R4 document bundle."""
-    return {
-        "resourceType": "Bundle",
-        "type": "document",
-        "entry": [
-            {
-                "resource": {
-                    "resourceType": "Composition",
-                    "status": "preliminary",
-                    "title": "AyuSetu Pre-Consultation History Summary"
-                }
-            }
-        ]
-    }
+    from ayusetu.clinical.fhir_engine import fhir_bundle_engine
+    return fhir_bundle_engine.generate_bundle(
+        encounter_id=id,
+        actor_id=principal.actor_id if principal else None,
+        actor_role=principal.role.value if principal else "physician",
+    )
 
 
 @router.get(
