@@ -161,3 +161,49 @@ class SessionSubmissionResponse(BaseModel):
     slots_persisted: int = 0
     utterances_persisted: int = 0
     redflags_detected: int = 0
+
+
+class SummaryEditDTO(BaseModel):
+    """Physician edit diff tracking DTO per PRD §14.2."""
+    model_config = ConfigDict(frozen=True)
+
+    id: str = Field(default_factory=lambda: str(uuid6.uuid7()))
+    summary_version_id: str
+    slot_path: str
+    old_value: Optional[Any] = None
+    new_value: Any
+    reason: Optional[str] = None
+    edited_by: str
+    edited_at: Optional[datetime] = None
+
+
+class SummaryEditRequest(BaseModel):
+    """Request schema for physician review and JSON patch diff application."""
+    slot_path: str
+    old_value: Optional[Any] = None
+    new_value: Any
+    reason: Optional[str] = None
+
+
+class SummaryEditResponse(BaseModel):
+    status: str = "updated"
+    encounter_id: str
+    summary_version_id: str
+    slot_path: str
+    recorded_in_summary_edit: bool = True
+    summary: Dict[str, Any]
+
+
+class SignEncounterRequest(BaseModel):
+    """Request schema for digitally signing clinical summary."""
+    physician_id: str
+    pin_or_token: Optional[str] = None
+
+
+class SignEncounterResponse(BaseModel):
+    status: str = "final"
+    encounter_id: str
+    version: int = 1
+    signed_by: str
+    signed_at: datetime
+

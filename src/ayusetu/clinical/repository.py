@@ -17,7 +17,7 @@ from sqlalchemy import create_engine, func, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from ayusetu.common.database import SyncSessionLocal, sync_engine, Base
-from ayusetu.common.models import Patient, Encounter, Slot, Utterance, SummaryVersion
+from ayusetu.common.models import Patient, Encounter, Slot, Utterance, SummaryVersion, SummaryEdit
 from ayusetu.clinical.models import (
     EncounterDTO,
     EncounterStatus,
@@ -30,6 +30,7 @@ from ayusetu.clinical.models import (
     UtteranceDTO,
     SummaryStatus,
     SummaryVersionDTO,
+    SummaryEditDTO,
 )
 
 logger = logging.getLogger("ayusetu.clinical.repository")
@@ -59,6 +60,7 @@ def get_default_session_factory() -> sessionmaker:
                     Slot.__table__,
                     Utterance.__table__,
                     SummaryVersion.__table__,
+                    SummaryEdit.__table__,
                 ]
             )
             _DEFAULT_SESSION_FACTORY = SyncSessionLocal
@@ -77,6 +79,7 @@ def get_default_session_factory() -> sessionmaker:
                     Slot.__table__,
                     Utterance.__table__,
                     SummaryVersion.__table__,
+                    SummaryEdit.__table__,
                 ],
             )
             _DEFAULT_SESSION_FACTORY = sessionmaker(
@@ -88,6 +91,16 @@ def get_default_session_factory() -> sessionmaker:
             )
 
         return _DEFAULT_SESSION_FACTORY
+
+
+def to_uuid(val: Any) -> uuid.UUID:
+    """Safely convert string or object to UUID."""
+    if isinstance(val, uuid.UUID):
+        return val
+    try:
+        return uuid.UUID(str(val))
+    except Exception:
+        return uuid.uuid5(uuid.NAMESPACE_DNS, str(val))
 
 
 def format_utc_dt(dt: Any) -> datetime:
@@ -176,10 +189,24 @@ def _row_to_summary_version_dto(row: SummaryVersion) -> SummaryVersionDTO:
     )
 
 
+def _row_to_summary_edit_dto(row: SummaryEdit) -> SummaryEditDTO:
+    """Map SQLAlchemy SummaryEdit row to SummaryEditDTO."""
+    return SummaryEditDTO(
+        id=str(row.id),
+        summary_version_id=str(row.summary_version_id),
+        slot_path=row.slot_path,
+        old_value=row.old_value,
+        new_value=row.new_value,
+        reason=row.reason,
+        edited_by=str(row.edited_by),
+        edited_at=format_utc_dt(row.edited_at),
+    )
+
+
 # Valid state transitions for encounter
 VALID_ENCOUNTER_TRANSITIONS = {
     EncounterStatus.DRAFT: {EncounterStatus.SUBMITTED, EncounterStatus.ABANDONED},
-    EncounterStatus.SUBMITTED: {EncounterStatus.PRELIMINARY, EncounterStatus.ABANDONED},
+    EncounterStatus.SUBMITTED: {EncounterStatus.PRELIMINARY, EncounterStatus.FINAL, EncounterStatus.ABANDONED},
     EncounterStatus.PRELIMINARY: {EncounterStatus.FINAL, EncounterStatus.ABANDONED},
     EncounterStatus.FINAL: set(),  # Terminal state
     EncounterStatus.ABANDONED: set(),  # Terminal state
@@ -625,6 +652,170 @@ class ClinicalRepository:
                     db.rollback()
                     raise
 
+    def create_summary_edit(
+        self,
+        edit: SummaryEditDTO,
+        db_session: Optional[Session] = None,
+    ) -> SummaryEditDTO:
+        """Persist a physician edit diff record."""
+        edit_uuid = to_uuid(edit.id)
+        version_uuid = to_uuid(edit.summary_version_id)
+        physician_uuid = to_uuid(edit.edited_by)
+
+        def _execute(db: Session) -> SummaryEditDTO:
+            row = SummaryEdit(
+                id=edit_uuid,
+                summary_version_id=version_uuid,
+                slot_path=edit.slot_path,
+                old_value=edit.old_value,
+                new_value=edit.new_value,
+                reason=edit.reason,
+                edited_by=physician_uuid,
+                edited_at=format_utc_dt(edit.edited_at),
+            )
+            db.add(row)
+            db.flush()
+            return _row_to_summary_edit_dto(row)
+
+        if db_session is not None:
+            return _execute(db_session)
+        else:
+            with self._lock:
+                with self._session_factory() as db:
+                    try:
+                        res = _execute(db)
+                        db.commit()
+                        return res
+                    except Exception:
+                        db.rollback()
+                        raise
+
+    def get_summary_edits(self, summary_version_id: str) -> List[SummaryEditDTO]:
+        """Retrieve all physician edit diffs for a given summary version."""
+        ver_uuid = to_uuid(summary_version_id)
+        with self._session_factory() as db:
+            rows = (
+                db.query(SummaryEdit)
+                .filter(SummaryEdit.summary_version_id == ver_uuid)
+                .order_by(SummaryEdit.edited_at.asc())
+                .all()
+            )
+            return [_row_to_summary_edit_dto(r) for r in rows]
+
+    def apply_summary_patch_atomic(
+        self,
+        encounter_id: str,
+        edit_dto: SummaryEditDTO,
+        new_composition: Dict[str, Any],
+    ) -> tuple[SummaryVersionDTO, SummaryEditDTO]:
+        """
+        Atomically update the preliminary summary composition and persist the physician edit diff.
+        Fails closed if the summary is already final/signed or does not exist.
+        """
+        enc_uuid = to_uuid(encounter_id)
+        edit_uuid = to_uuid(edit_dto.id)
+        physician_uuid = to_uuid(edit_dto.edited_by)
+
+        with self._lock:
+            with self._session_factory() as db:
+                try:
+                    summary_row = (
+                        db.query(SummaryVersion)
+                        .filter(SummaryVersion.encounter_id == enc_uuid)
+                        .order_by(SummaryVersion.version.desc())
+                        .with_for_update()
+                        .first()
+                    )
+                    if not summary_row:
+                        raise ValueError(f"Summary not found for encounter: {encounter_id}")
+
+                    if summary_row.status == SummaryStatus.FINAL.value:
+                        raise ValueError("Cannot edit a finalized/signed summary record")
+
+                    # Update composition in place
+                    summary_row.composition = new_composition
+
+                    # Create and persist SummaryEdit record
+                    edit_row = SummaryEdit(
+                        id=edit_uuid,
+                        summary_version_id=summary_row.id,
+                        slot_path=edit_dto.slot_path,
+                        old_value=edit_dto.old_value,
+                        new_value=edit_dto.new_value,
+                        reason=edit_dto.reason,
+                        edited_by=physician_uuid,
+                        edited_at=format_utc_dt(edit_dto.edited_at),
+                    )
+                    db.add(edit_row)
+
+                    db.commit()
+                    db.refresh(summary_row)
+                    db.refresh(edit_row)
+                    return _row_to_summary_version_dto(summary_row), _row_to_summary_edit_dto(edit_row)
+                except Exception:
+                    db.rollback()
+                    raise
+
+    def sign_summary_atomic(
+        self,
+        encounter_id: str,
+        physician_id: str,
+        signed_at: Optional[datetime] = None,
+    ) -> tuple[SummaryVersionDTO, EncounterDTO]:
+        """
+        Atomically transition preliminary summary and encounter to FINAL state,
+        populating signed_by and signed_at.
+        Fails closed if already final or missing.
+        """
+        enc_uuid = to_uuid(encounter_id)
+        physician_uuid = to_uuid(physician_id)
+        sign_dt = format_utc_dt(signed_at)
+
+        with self._lock:
+            with self._session_factory() as db:
+                try:
+                    # 1. Lock and verify encounter
+                    enc_row = db.query(Encounter).filter(Encounter.id == enc_uuid).with_for_update().first()
+                    if not enc_row:
+                        raise ValueError(f"Encounter not found: {encounter_id}")
+
+                    # 2. Lock and verify latest summary version
+                    summary_row = (
+                        db.query(SummaryVersion)
+                        .filter(SummaryVersion.encounter_id == enc_uuid)
+                        .order_by(SummaryVersion.version.desc())
+                        .with_for_update()
+                        .first()
+                    )
+                    if not summary_row:
+                        raise ValueError(f"Summary not found for encounter: {encounter_id}")
+
+                    if summary_row.status == SummaryStatus.FINAL.value:
+                        raise ValueError("Summary is already finalized and signed")
+
+                    # 3. Transition summary to final
+                    summary_row.status = SummaryStatus.FINAL.value
+                    summary_row.signed_by = physician_uuid
+                    summary_row.signed_at = sign_dt
+
+                    # Update composition JSON with final metadata
+                    comp = dict(summary_row.composition) if isinstance(summary_row.composition, dict) else summary_row.composition
+                    comp["status"] = SummaryStatus.FINAL.value
+                    comp["signed_by"] = str(physician_id)
+                    comp["signed_at"] = sign_dt.isoformat()
+                    summary_row.composition = comp
+
+                    # 4. Transition encounter to final
+                    enc_row.status = EncounterStatus.FINAL.value
+
+                    db.commit()
+                    db.refresh(summary_row)
+                    db.refresh(enc_row)
+                    return _row_to_summary_version_dto(summary_row), _row_to_encounter_dto(enc_row)
+                except Exception:
+                    db.rollback()
+                    raise
+
     def count_encounters(self) -> int:
         """Count total encounters."""
         with self._session_factory() as db:
@@ -640,11 +831,17 @@ class ClinicalRepository:
         with self._session_factory() as db:
             return db.query(func.count(SummaryVersion.id)).scalar() or 0
 
+    def count_summary_edits(self) -> int:
+        """Count total summary edit records."""
+        with self._session_factory() as db:
+            return db.query(func.count(SummaryEdit.id)).scalar() or 0
+
     def clear_for_testing(self) -> None:
         """Reset clinical tables for test isolation."""
         with self._lock:
             with self._session_factory() as db:
                 try:
+                    db.query(SummaryEdit).delete()
                     db.query(SummaryVersion).delete()
                     db.query(Slot).delete()
                     db.query(Utterance).delete()
@@ -653,3 +850,4 @@ class ClinicalRepository:
                     db.commit()
                 except Exception:
                     db.rollback()
+

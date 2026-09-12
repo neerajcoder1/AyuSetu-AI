@@ -340,30 +340,45 @@ def get_encounter_summary(id: str):
 @router.patch(
     "/encounters/{id}/summary",
     status_code=status.HTTP_200_OK,
-    dependencies=[Depends(require_permission(Resource.SIGNED_CLINICAL_RECORD, Action.UPDATE))]
 )
-def patch_encounter_summary(id: str, payload: SummaryEditRequest):
+def patch_encounter_summary(
+    id: str,
+    payload: SummaryEditRequest,
+    principal: Principal = Depends(require_permission(Resource.SIGNED_CLINICAL_RECORD, Action.UPDATE)),
+):
     """Apply physician edits and record diff in summary_edit."""
-    return {
-        "status": "updated",
-        "encounter_id": id,
-        "slot_path": payload.slot_path,
-        "recorded_in_summary_edit": True
-    }
+    from ayusetu.clinical.service import clinical_service
+    return clinical_service.apply_physician_patch(
+        encounter_id=id,
+        slot_path=payload.slot_path,
+        new_value=payload.new_value,
+        old_value=payload.old_value,
+        reason=payload.reason,
+        physician_id=principal.actor_id,
+        physician_role=principal.role.value,
+    )
 
 
 @router.post(
     "/encounters/{id}/sign",
     status_code=status.HTTP_200_OK,
-    dependencies=[Depends(require_permission(Resource.SIGNED_CLINICAL_RECORD, Action.SIGN))]
 )
-def sign_encounter_summary(id: str, payload: SignEncounterRequest):
+def sign_encounter_summary(
+    id: str,
+    payload: SignEncounterRequest,
+    request: Request,
+    principal: Principal = Depends(require_permission(Resource.SIGNED_CLINICAL_RECORD, Action.SIGN)),
+):
     """Sign summary: preliminary -> final."""
-    return {
-        "status": "final",
-        "encounter_id": id,
-        "signed_by": payload.physician_id
-    }
+    from ayusetu.clinical.service import clinical_service
+    physician_id = payload.physician_id or principal.actor_id
+    client_ip = request.client.host if request.client else None
+    return clinical_service.sign_summary(
+        encounter_id=id,
+        physician_id=physician_id,
+        physician_role=principal.role.value,
+        ip_address=client_ip,
+    )
 
 
 @router.get(
