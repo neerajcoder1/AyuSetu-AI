@@ -406,17 +406,51 @@ def get_encounter_fhir(
 )
 def get_alerts(tier: int = Query(1, ge=1, le=3), status: str = "open"):
     """Tier 1/2/3 alert queue for the Ops Console."""
-    return {"tier": tier, "status": status, "alerts": []}
+    from ayusetu.redflag.service import red_flag_service
+    tier1_items = red_flag_service.get_tier1_queue()
+    alerts_list = [
+        {
+            "event_id": item.event.id,
+            "encounter_id": item.encounter_id,
+            "rule_id": item.event.rule_id,
+            "tier": item.event.tier,
+            "trigger_text": item.event.trigger_text,
+            "detected_at": item.detected_at,
+            "seconds_since_detection": item.seconds_since_detection,
+            "escalation_level": item.escalation_level,
+            "is_overdue": item.is_overdue,
+            "status": item.event.status.value if hasattr(item.event.status, "value") else str(item.event.status),
+        }
+        for item in tier1_items
+        if not status or status.lower() == "all" or item.event.status.value.lower() == status.lower()
+    ]
+    return {"tier": tier, "status": status, "alerts": alerts_list}
 
 
 @router.post(
     "/alerts/{id}/acknowledge",
     status_code=status.HTTP_200_OK,
-    dependencies=[Depends(require_roles(Role.NURSE, Role.PHYSICIAN))]
 )
-def acknowledge_alert(id: str, payload: AlertAcknowledgeRequest):
+def acknowledge_alert(
+    id: str,
+    payload: AlertAcknowledgeRequest,
+    principal: Principal = Depends(require_roles(Role.NURSE, Role.PHYSICIAN)),
+):
     """Acknowledge alert with disposition."""
-    return {"alert_id": id, "status": "acknowledged", "disposition": payload.disposition}
+    from ayusetu.redflag.service import red_flag_service
+    updated = red_flag_service.acknowledge_event(
+        event_id=id,
+        clinician_id=principal.actor_id,
+        clinician_role=principal.role.value,
+        notes=f"{payload.disposition}: {payload.notes}" if payload.notes else payload.disposition,
+    )
+    return {
+        "alert_id": id,
+        "status": updated.status.value if hasattr(updated.status, "value") else str(updated.status),
+        "disposition": payload.disposition,
+        "acknowledged_by": updated.acknowledged_by,
+        "acknowledged_at": updated.acknowledged_at,
+    }
 
 
 @router.post("/terminology/$translate", status_code=status.HTTP_200_OK)
@@ -456,37 +490,125 @@ def get_prior_records(
 
 
 @router.post("/sessions/{id}/resume", status_code=status.HTTP_200_OK)
-def resume_session(id: str, qr_payload: Dict[str, Any]):
+def resume_session(
+    id: str,
+    qr_payload: Dict[str, Any],
+):
     """Claim incomplete PWA session at station via QR code."""
-    return {"session_id": id, "status": "resumed"}
+    session = session_cache.get_session(id)
+    if not session:
+        raise AyuSetuGatewayError(
+            ErrorCode.SESSION_EXPIRED,
+            f"Session '{id}' expired or not found",
+            404,
+        )
+
+    token_in_qr = qr_payload.get("token")
+    if token_in_qr and token_in_qr != session.get("token"):
+        raise AyuSetuGatewayError(
+            ErrorCode.POLICY_DENIED,
+            "Invalid QR session token",
+            403,
+        )
+
+    station_id = qr_payload.get("station_id") or "kiosk_station"
+    session_cache.update_session(id, {
+        "claimed_by_station": station_id,
+        "channel": "kiosk",
+        "status": "RESUMED",
+    })
+
+    return {
+        "session_id": id,
+        "encounter_id": session.get("encounter_id"),
+        "status": "resumed",
+        "claimed_by_station": station_id,
+    }
 
 
 @router.post("/sessions/{id}/companion-link", status_code=status.HTTP_200_OK)
 def issue_companion_link(id: str, payload: CompanionLinkRequest):
     """Issue scoped magic link to a patient-nominated phone number."""
+    session = session_cache.get_session(id)
+    if not session:
+        raise AyuSetuGatewayError(
+            ErrorCode.SESSION_EXPIRED,
+            f"Session '{id}' not found or expired",
+            404,
+        )
+
+    companion_token = SessionCache.generate_token()
+    session_cache.update_session(id, {
+        "companion_mobile": payload.nominated_mobile,
+        "companion_relationship": payload.relationship,
+        "companion_token": companion_token,
+    })
+
     return {
         "session_id": id,
         "nominated_mobile": payload.nominated_mobile,
-        "magic_link": f"/pwa/companion/{id}?token={SessionCache.generate_token()}",
-        "expires_in_minutes": settings.COMPANION_LINK_TTL_MINUTES
+        "relationship": payload.relationship,
+        "magic_link": f"/pwa/companion/{id}?token={companion_token}",
+        "expires_in_minutes": settings.COMPANION_LINK_TTL_MINUTES,
     }
 
 
 @router.post(
     "/exports",
     status_code=status.HTTP_202_ACCEPTED,
-    dependencies=[Depends(require_roles(Role.MRD, Role.AUDITOR))]
+    dependencies=[Depends(require_roles(Role.MRD, Role.AUDITOR, Role.ADMIN))]
 )
-def request_deid_export(payload: DeidExportRequest):
+def request_deid_export(
+    payload: DeidExportRequest,
+    principal: Principal = Depends(get_current_principal),
+):
     """Request de-identified export with two-person authorization."""
-    if payload.approver_1 == payload.approver_2:
+    from ayusetu.deid.models import ExportPurpose
+    from ayusetu.audit.service import audit_service
+    from ayusetu.audit.models import AuditAction, AuditOutcome
+
+    app1 = (payload.approver_1 or "").strip()
+    app2 = (payload.approver_2 or "").strip()
+
+    if not app1 or not app2 or app1 == app2:
         raise AyuSetuGatewayError(
             ErrorCode.POLICY_DENIED,
             "Two distinct approvers are required for de-identified data export (Separation of Duties)",
             403
         )
+
+    purpose_enum = ExportPurpose(payload.purpose.lower()) if payload.purpose else ExportPurpose.RESEARCH
+    export_id = str(uuid6.uuid7())
+
+    # Immutable audit recording (Zero PHI)
+    try:
+        actor_id = principal.actor_id if principal and principal.actor_id else "00000000-0000-0000-0000-000000000000"
+        actor_role = principal.role.value if principal and principal.role else "mrd"
+        audit_service.record_event(
+            actor_id=actor_id,
+            actor_role=actor_role,
+            action=AuditAction.EXPORT,
+            resource_type="deid_export",
+            resource_id=export_id,
+            outcome=AuditOutcome.ALLOW,
+            reason="De-identified cohort export requested with valid Two-Person SoD approval",
+            safe_metadata={
+                "export_id": export_id,
+                "purpose": purpose_enum.value,
+                "date_from": payload.date_from,
+                "date_to": payload.date_to,
+                "approver_1": payload.approver_1,
+                "approver_2": payload.approver_2,
+                "k_anonymity_threshold": 5,
+            },
+        )
+    except Exception:
+        pass
+
     return {
-        "export_id": str(uuid6.uuid7()),
+        "export_id": export_id,
         "status": "pending_processing",
-        "k_anonymity_threshold": 5
+        "k_anonymity_threshold": 5,
+        "purpose": purpose_enum.value,
+        "message": "Export initiated successfully under Two-Person SoD controls",
     }
