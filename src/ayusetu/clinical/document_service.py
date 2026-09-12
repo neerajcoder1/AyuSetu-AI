@@ -8,6 +8,7 @@ OCR provider execution, and structured clinical entity extraction (PRD §11.2).
 from typing import Any, Dict, List, Optional
 import uuid6
 
+import os
 from ayusetu.ai.clinical.document_ai.capture_quality import score_capture, CaptureQualityScore
 from ayusetu.ai.clinical.document_ai.contracts import (
     DocumentAIResult,
@@ -15,9 +16,56 @@ from ayusetu.ai.clinical.document_ai.contracts import (
     OCRResult,
     REVIEW_CONFIDENCE_THRESHOLD,
 )
-from ayusetu.ai.clinical.document_ai.entity_extractor import extract_entities
+from ayusetu.ai.clinical.document_ai.entity_extractor import extract_entities, detect_prompt_injections
 from ayusetu.ai.clinical.document_ai.ocr import MockOCRProvider, OCRProvider, TesseractOCRProvider
 from ayusetu.gateway.errors import AyuSetuGatewayError, ErrorCode
+
+
+def validate_magic_bytes(data: bytes, filename: Optional[str] = None) -> str:
+    """
+    Validate file format and magic bytes per PRD §21.11 / SEC-T-09.
+    Rejects malformed files, polyglot executables (MZ, ELF), and embedded scripts.
+    Returns detected format ('pdf', 'png', 'jpeg', 'webp').
+    """
+    if not data or len(data) < 4:
+        raise AyuSetuGatewayError(
+            ErrorCode.DOC_QUALITY_REJECTED,
+            "Document rejected: file is empty or too short for valid magic bytes",
+            422,
+        )
+
+    # 1. Polyglot / Executable inspection (Fail-closed)
+    if data.startswith(b"MZ") or data.startswith(b"\x7fELF"):
+        raise AyuSetuGatewayError(
+            ErrorCode.DOC_QUALITY_REJECTED,
+            "Document rejected: executable polyglot payload detected",
+            422,
+        )
+
+    # Check for script injection in initial header bytes
+    initial_header = data[:256].lower()
+    if b"<script" in initial_header or b"<?php" in initial_header or b"<%" in initial_header:
+        raise AyuSetuGatewayError(
+            ErrorCode.DOC_QUALITY_REJECTED,
+            "Document rejected: embedded script tags detected in file header",
+            422,
+        )
+
+    # 2. Magic byte matching
+    if data.startswith(b"%PDF-"):
+        return "pdf"
+    elif data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    elif data.startswith(b"\xff\xd8\xff"):
+        return "jpeg"
+    elif data.startswith(b"RIFF") and len(data) >= 12 and data[8:12] == b"WEBP":
+        return "webp"
+
+    raise AyuSetuGatewayError(
+        ErrorCode.DOC_QUALITY_REJECTED,
+        "Document rejected: unsupported or malformed file format (magic bytes mismatch)",
+        422,
+    )
 
 
 class DocumentService:
@@ -37,15 +85,54 @@ class DocumentService:
         grid: Optional[List[List[int]]] = None,
         image_path: Optional[str] = None,
         raw_text: Optional[str] = None,
+        raw_bytes: Optional[bytes] = None,
         page_no: int = 1,
     ) -> DocumentAIResult:
         """
         Process a physical document page:
-        1. Capture quality scoring ("reject before accept" per PRD §11.1).
-        2. OCR text extraction.
-        3. Structured clinical entity extraction (PRD §11.2).
-        4. In-memory session registry persistence.
+        1. Magic byte & polyglot validation (PRD §21.11 / SEC-T-09).
+        2. Capture quality scoring ("reject before accept" per PRD §11.1).
+        3. OCR text extraction.
+        4. Structured clinical entity extraction with prompt-injection isolation (PRD §11.2, §21.10).
+        5. In-memory session registry persistence.
         """
+        # 0. Validate magic bytes if raw bytes or image path provided
+        if raw_bytes is not None:
+            try:
+                validate_magic_bytes(raw_bytes)
+            except AyuSetuGatewayError as err:
+                try:
+                    from ayusetu.gateway.auth.event_hooks import dispatch_security_event
+                    dispatch_security_event(
+                        event_type="MALFORMED_DOCUMENT_REJECTED",
+                        actor_id="document_validator",
+                        actor_role="system",
+                        target_resource=f"session_{session_id}",
+                        reason=str(err.detail),
+                    )
+                except Exception:
+                    pass
+                raise
+
+        if image_path and os.path.exists(image_path):
+            try:
+                with open(image_path, "rb") as f:
+                    header = f.read(512)
+                validate_magic_bytes(header, filename=image_path)
+            except AyuSetuGatewayError as err:
+                try:
+                    from ayusetu.gateway.auth.event_hooks import dispatch_security_event
+                    dispatch_security_event(
+                        event_type="MALFORMED_DOCUMENT_REJECTED",
+                        actor_id="document_validator",
+                        actor_role="system",
+                        target_resource=image_path,
+                        reason=str(err.detail),
+                    )
+                except Exception:
+                    pass
+                raise
+
         quality: Optional[CaptureQualityScore] = None
 
         # 1. Quality scoring if pixel grid is supplied

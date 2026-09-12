@@ -652,7 +652,7 @@ def resume_session(
 
 @router.post("/sessions/{id}/companion-link", status_code=status.HTTP_200_OK)
 def issue_companion_link(id: str, payload: CompanionLinkRequest):
-    """Issue scoped magic link to a patient-nominated phone number."""
+    """Issue scoped magic link to a patient-nominated phone number per PRD §23.4."""
     session = session_cache.get_session(id)
     if not session:
         raise AyuSetuGatewayError(
@@ -661,11 +661,30 @@ def issue_companion_link(id: str, payload: CompanionLinkRequest):
             404,
         )
 
+    # SEC-T-03: Refuse link generation if session already submitted/finalized
+    session_status = session.get("status", "ACTIVE")
+    if session_status in ("SUBMITTED", "FINAL", "ABANDONED"):
+        from ayusetu.gateway.auth.event_hooks import dispatch_security_event
+        dispatch_security_event(
+            event_type="COMPANION_LINK_EXPIRED_OR_SUBMITTED",
+            actor_id=payload.nominated_mobile,
+            actor_role="companion",
+            target_resource=f"session_{id}",
+            reason=f"Attempted to issue companion link for {session_status} session",
+        )
+        raise AyuSetuGatewayError(
+            ErrorCode.POLICY_DENIED,
+            f"Cannot issue companion link: session is already {session_status.lower()}",
+            401,
+        )
+
     companion_token = SessionCache.generate_token()
     session_cache.update_session(id, {
         "companion_mobile": payload.nominated_mobile,
         "companion_relationship": payload.relationship,
         "companion_token": companion_token,
+        "companion_device_fingerprint": None,
+        "companion_consumed": False,
     })
 
     return {
@@ -674,6 +693,84 @@ def issue_companion_link(id: str, payload: CompanionLinkRequest):
         "relationship": payload.relationship,
         "magic_link": f"/pwa/companion/{id}?token={companion_token}",
         "expires_in_minutes": settings.COMPANION_LINK_TTL_MINUTES,
+    }
+
+
+@router.post("/sessions/{id}/companion-access", status_code=status.HTTP_200_OK)
+def access_companion_session(
+    id: str,
+    token: str = Query(...),
+    x_device_fingerprint: Optional[str] = Header(None, alias="X-Device-Fingerprint"),
+):
+    """
+    Validate companion mode access per PRD §23.4 and SEC-T-03.
+    Rejects reuse after submission and enforces single-device fingerprint binding.
+    """
+    from ayusetu.gateway.auth.event_hooks import dispatch_security_event
+
+    session = session_cache.get_session(id)
+    if not session:
+        dispatch_security_event(
+            event_type="COMPANION_LINK_EXPIRED_OR_SUBMITTED",
+            actor_id="companion",
+            actor_role="companion",
+            target_resource=f"session_{id}",
+            reason="Session not found or expired",
+        )
+        raise AyuSetuGatewayError(ErrorCode.SESSION_EXPIRED, "Companion link expired or session ended", 401)
+
+    # 1. Post-submission check
+    if session.get("status") in ("SUBMITTED", "FINAL", "ABANDONED") or session.get("companion_consumed"):
+        dispatch_security_event(
+            event_type="COMPANION_REUSE_ATTEMPT",
+            actor_id="companion",
+            actor_role="companion",
+            target_resource=f"session_{id}",
+            reason="Companion link reused after session submission or finalization",
+        )
+        raise AyuSetuGatewayError(
+            ErrorCode.POLICY_DENIED,
+            "Companion link has already been used or session is completed",
+            401,
+        )
+
+    # 2. Token match check
+    if session.get("companion_token") != token:
+        dispatch_security_event(
+            event_type="COMPANION_AUTH_FAILED",
+            actor_id="companion",
+            actor_role="companion",
+            target_resource=f"session_{id}",
+            reason="Invalid companion token provided",
+        )
+        raise AyuSetuGatewayError(ErrorCode.POLICY_DENIED, "Invalid companion link token", 401)
+
+    # 3. Single-device binding check (SEC-T-03)
+    existing_device = session.get("companion_device_fingerprint")
+    if existing_device and x_device_fingerprint and existing_device != x_device_fingerprint:
+        dispatch_security_event(
+            event_type="COMPANION_CROSS_DEVICE_REUSE_ATTEMPT",
+            actor_id=x_device_fingerprint,
+            actor_role="companion",
+            target_resource=f"session_{id}",
+            reason=f"Cross-device replay attempt: claimed device {x_device_fingerprint} != bound device {existing_device}",
+        )
+        raise AyuSetuGatewayError(
+            ErrorCode.POLICY_DENIED,
+            "Companion link is already bound to another device. Cross-device reuse prohibited.",
+            401,
+        )
+
+    # Bind first accessing device
+    if not existing_device and x_device_fingerprint:
+        session_cache.update_session(id, {"companion_device_fingerprint": x_device_fingerprint})
+
+    return {
+        "session_id": id,
+        "encounter_id": session.get("encounter_id"),
+        "status": session.get("status", "ACTIVE"),
+        "channel": "pwa_companion",
+        "device_bound": x_device_fingerprint or existing_device,
     }
 
 

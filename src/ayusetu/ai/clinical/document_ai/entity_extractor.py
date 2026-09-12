@@ -75,20 +75,67 @@ _PROVIDER_RE = re.compile(
 )
 
 
+# ── Prompt Injection Defense ─────────────────────────────────────────────────
+_PROMPT_INJECTION_PATTERNS = [
+    re.compile(r"(?i)ignore\s+(?:all\s+)?(?:previous|prior|above)\s+instructions?", re.I),
+    re.compile(r"(?i)disregard\s+(?:all\s+)?(?:prior|previous|clinical)\s+(?:instructions?|directives?)", re.I),
+    re.compile(r"(?i)system\s*:\s*(?:override|reset|execute|admin|mode)", re.I),
+    re.compile(r"(?i)you\s+are\s+now\s+in\s+(?:admin|superuser|jailbroken)\s+mode", re.I),
+    re.compile(r"(?i)override\s+(?:diagnosis|medication|clinical\s+record|prescription)\s*(?:to|with)?", re.I),
+    re.compile(r"(?i)output\s+(?:the\s+)?(?:secret|api\s*key|password|credentials?)", re.I),
+    re.compile(r"(?i)delete\s+all\s+(?:records?|data|patients?)", re.I),
+]
+
+
+def detect_prompt_injections(text: str) -> List[str]:
+    """Detect potential adversarial prompt injection payloads in document text."""
+    detected = []
+    for pattern in _PROMPT_INJECTION_PATTERNS:
+        matches = pattern.findall(text)
+        if matches:
+            detected.extend(matches if isinstance(matches[0], str) else [m[0] for m in matches])
+    return detected
+
+
+def sanitize_document_text(text: str) -> str:
+    """Isolate and strip embedded prompt injection directives from document text."""
+    sanitized = text
+    for pattern in _PROMPT_INJECTION_PATTERNS:
+        sanitized = pattern.sub("[ISOLATED_DOCUMENT_DATA]", sanitized)
+    return sanitized
+
+
 def _confidence(match_completeness: float) -> float:
     """Simple confidence heuristic from how many optional groups matched."""
     return round(0.6 + 0.4 * match_completeness, 2)
 
 
 def extract_entities(raw_text: str, page_no: int = 1) -> List[ExtractedEntity]:
+    # Detect and isolate prompt injection payloads per PRD §21.10 / SEC-T-02
+    injections = detect_prompt_injections(raw_text)
+    if injections:
+        try:
+            from ayusetu.gateway.auth.event_hooks import dispatch_security_event
+            dispatch_security_event(
+                event_type="DOCUMENT_PROMPT_INJECTION_DETECTED",
+                actor_id="document_ai_parser",
+                actor_role="system",
+                target_resource=f"document_page_{page_no}",
+                reason=f"Adversarial prompt injection attempt detected and isolated: {', '.join(injections[:3])}",
+                metadata={"injections_detected": injections, "page_no": page_no},
+            )
+        except Exception:
+            pass
+
+    sanitized_text = sanitize_document_text(raw_text)
     entities: List[ExtractedEntity] = []
 
-    entities.extend(_extract_medications(raw_text, page_no))
-    entities.extend(_extract_lab_results(raw_text, page_no))
-    entities.extend(_extract_vitals(raw_text, page_no))
-    entities.extend(_extract_allergies(raw_text, page_no))
-    entities.extend(_extract_diagnoses(raw_text, page_no))
-    entities.extend(_extract_providers(raw_text, page_no))
+    entities.extend(_extract_medications(sanitized_text, page_no))
+    entities.extend(_extract_lab_results(sanitized_text, page_no))
+    entities.extend(_extract_vitals(sanitized_text, page_no))
+    entities.extend(_extract_allergies(sanitized_text, page_no))
+    entities.extend(_extract_diagnoses(sanitized_text, page_no))
+    entities.extend(_extract_providers(sanitized_text, page_no))
 
     for e in entities:
         if e.confidence < REVIEW_CONFIDENCE_THRESHOLD:
