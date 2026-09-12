@@ -191,10 +191,11 @@ def get_mpi_candidates(
     name: Optional[str] = None,
     dob: Optional[str] = None,
     mobile: Optional[str] = None,
-    principal: Optional[Principal] = None
+    principal: Optional[Principal] = None,
 ):
     """Fetch candidate patient matches for the review queue."""
-    return {"candidates": [], "count": 0}
+    from ayusetu.clinical.mpi_service import mpi_service
+    return mpi_service.search_candidates(name=name, dob=dob, mobile=mobile)
 
 
 @router.post("/sessions/{id}/consent", status_code=status.HTTP_200_OK)
@@ -243,32 +244,102 @@ def record_consent(id: str, payload: ConsentRequest):
     }
 
 
-
 @router.post("/sessions/{id}/documents", status_code=status.HTTP_202_ACCEPTED)
-def upload_document(id: str, request: Request):
-    """Upload physical document image / PDF."""
+async def upload_document(
+    id: str,
+    request: Request,
+):
+    """Upload physical document image / PDF and extract clinical entities."""
     session = session_cache.get_session(id)
     if not session:
-        raise AyuSetuGatewayError(ErrorCode.SESSION_EXPIRED, "Session expired or not found", 401)
+        raise AyuSetuGatewayError(ErrorCode.SESSION_EXPIRED, f"Session '{id}' expired or not found", 401)
 
-    doc_id = str(uuid6.uuid7())
+    from ayusetu.clinical.document_service import document_service
+
+    grid = None
+    image_path = None
+    raw_text = None
+    page_no = 1
+
+    try:
+        content_type = request.headers.get("content-type", "")
+        if "application/json" in content_type:
+            data = await request.json()
+            if isinstance(data, dict):
+                grid = data.get("grid")
+                image_path = data.get("image_path")
+                raw_text = data.get("raw_text")
+                page_no = int(data.get("page_no", 1))
+    except Exception:
+        pass
+
+    result = document_service.process_document(
+        session_id=id,
+        grid=grid,
+        image_path=image_path,
+        raw_text=raw_text,
+        page_no=page_no,
+    )
+
+    quality_score = result.quality.blur_score if result.quality else 0.95
     return {
-        "document_id": doc_id,
-        "quality_score": 0.95,
-        "ocr_status": "processing",
-        "page_no": 1
+        "document_id": result.document_id,
+        "session_id": id,
+        "quality_score": quality_score,
+        "ocr_status": "completed",
+        "page_no": page_no,
+        "entities_count": len(result.entities),
     }
 
 
 @router.get("/sessions/{id}/documents/{doc_id}", status_code=status.HTTP_200_OK)
 def get_document_extraction(id: str, doc_id: str):
     """Fetch document extraction status and entities."""
+    session = session_cache.get_session(id)
+    if not session:
+        raise AyuSetuGatewayError(ErrorCode.SESSION_EXPIRED, f"Session '{id}' expired or not found", 401)
+
+    from ayusetu.clinical.document_service import document_service
+    doc = document_service.get_document(doc_id)
+    if not doc:
+        raise AyuSetuGatewayError(ErrorCode.NOT_FOUND, f"Document '{doc_id}' not found", 404)
+
     return {
-        "document_id": doc_id,
+        "document_id": doc.document_id,
+        "session_id": id,
         "ocr_status": "completed",
-        "quality_score": 0.95,
-        "entities": []
+        "quality_score": doc.quality.blur_score if doc.quality else 0.95,
+        "quality": {
+            "blur_score": doc.quality.blur_score if doc.quality else 0.95,
+            "glare_score": doc.quality.glare_score if doc.quality else 1.0,
+            "skew_score": doc.quality.skew_score if doc.quality else 1.0,
+            "accepted": doc.quality.accepted if doc.quality else True,
+            "rejection_reasons": doc.quality.rejection_reasons if doc.quality else [],
+        },
+        "entities": [
+            {
+                "entity_type": e.entity_type.value if hasattr(e.entity_type, "value") else str(e.entity_type),
+                "raw_text": e.raw_text,
+                "normalised": e.normalised,
+                "confidence": e.confidence,
+                "code_system": e.code_system,
+                "code": e.code,
+                "needs_review": e.needs_review,
+                "fhir_resource_type": e.fhir_resource_type,
+                "page_no": e.page_no,
+            }
+            for e in doc.entities
+        ],
+        "ocr": [
+            {
+                "page_no": o.page_no,
+                "raw_text": o.raw_text,
+                "mean_confidence": o.mean_confidence,
+            }
+            for o in doc.ocr
+        ]
     }
+
 
 
 @router.post("/sessions/{id}/submit", status_code=status.HTTP_202_ACCEPTED)
