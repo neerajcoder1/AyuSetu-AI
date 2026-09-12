@@ -92,6 +92,17 @@ class DeidExportRequest(BaseModel):
     approver_2: str
 
 
+class MpiMergeRequest(BaseModel):
+    source_patient_id: str
+    target_patient_id: str
+    reason: str = "Duplicate demographic match merged by MRD"
+
+
+class MpiUnmergeRequest(BaseModel):
+    source_patient_id: str
+    reason: str = "Erroneous merge reversal requested by MRD"
+
+
 class LoginRequest(BaseModel):
     username: str
     password: Optional[str] = None
@@ -109,16 +120,16 @@ def login_for_access_token(payload: LoginRequest):
             "Invalid staff username or credentials",
             401
         )
-
     token = f"staff-token-{payload.username}"
     return {
         "access_token": token,
         "token_type": "bearer",
         "actor_id": staff["actor_id"],
         "role": staff["role"].value,
-        "department": staff["department"],
-        "expires_in_minutes": 480  # 8 hour shift
+        "department": staff.get("department", "General"),
+        "expires_in_minutes": 480,
     }
+
 
 
 @router.get("/auth/me", status_code=status.HTTP_200_OK)
@@ -131,6 +142,7 @@ def get_current_user_profile(principal: Principal = Depends(get_current_principa
         "encounter_id": principal.encounter_id,
         "is_authenticated": principal.is_authenticated,
     }
+
 
 
 @router.post("/auth/logout", status_code=status.HTTP_200_OK)
@@ -146,16 +158,18 @@ def logout(
     return {"status": "logged_out", "actor_id": principal.actor_id}
 
 
-# --- Endpoints per PRD §22.5 ---
+# --- Kiosk Session & Intake Endpoints ---
 
 @router.post("/sessions", response_model=SessionCreateResponse, status_code=status.HTTP_201_CREATED)
 def create_session(
     payload: Optional[SessionCreateRequest] = None,
-    x_device_fingerprint: Optional[str] = Header(None)
+    channel: str = Query("kiosk", pattern="^(kiosk|pwa_self|pwa_companion|assisted)$"),
+    x_device_fingerprint: Optional[str] = Header(None, alias="X-Device-Fingerprint")
 ):
-    """Create an encounter session and return session token and encounter ID."""
+    """Initialize ephemeral session state per PRD §22.4."""
+    if payload:
+        channel = payload.channel
     enc_id = uuid6.uuid7()
-    channel = payload.channel if payload else "kiosk"
     
     sess_data = session_cache.create_session(
         encounter_id=enc_id,
@@ -196,6 +210,45 @@ def get_mpi_candidates(
     """Fetch candidate patient matches for the review queue."""
     from ayusetu.clinical.mpi_service import mpi_service
     return mpi_service.search_candidates(name=name, dob=dob, mobile=mobile)
+
+
+@router.post(
+    "/mpi/merge",
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(require_roles(Role.MRD, Role.ADMIN))]
+)
+def merge_mpi_patients(
+    payload: MpiMergeRequest,
+    principal: Principal = Depends(get_current_principal),
+):
+    """Merge two patient records under an authoritative master per PRD v3 §4.3 & §23.1."""
+    from ayusetu.clinical.mpi_service import mpi_service
+    return mpi_service.merge_records(
+        source_patient_id=payload.source_patient_id,
+        target_patient_id=payload.target_patient_id,
+        reason=payload.reason,
+        actor_id=principal.actor_id if principal else None,
+        actor_role=principal.role.value if principal else "mrd",
+    )
+
+
+@router.post(
+    "/mpi/unmerge",
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(require_roles(Role.MRD, Role.ADMIN))]
+)
+def unmerge_mpi_patient(
+    payload: MpiUnmergeRequest,
+    principal: Principal = Depends(get_current_principal),
+):
+    """Reversibly unmerge a merged patient record per PRD v3 §4.3 & §23.1."""
+    from ayusetu.clinical.mpi_service import mpi_service
+    return mpi_service.unmerge_record(
+        source_patient_id=payload.source_patient_id,
+        reason=payload.reason,
+        actor_id=principal.actor_id if principal else None,
+        actor_role=principal.role.value if principal else "mrd",
+    )
 
 
 @router.post("/sessions/{id}/consent", status_code=status.HTTP_200_OK)

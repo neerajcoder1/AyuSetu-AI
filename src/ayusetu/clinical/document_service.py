@@ -99,7 +99,112 @@ class DocumentService:
         )
 
         self._document_store[doc_id] = result
+
+        # Automatically integrate extracted entities into session slot candidates
+        if session_id:
+            try:
+                self.integrate_document_entities_into_session(session_id=session_id, document_id=doc_id)
+            except Exception as e:
+                import logging
+                logging.getLogger("ayusetu.document_service").warning("Slot integration warning: %s", e)
+
         return result
+
+    def integrate_document_entities_into_session(
+        self,
+        session_id: str,
+        document_id: str,
+        overwrite_patient: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """
+        Integrate extracted document entities into Socrates session slot state per PRD v3 §11.3:
+        - Retains provenance link (source='document', source_ref=doc_id).
+        - Preserves needs_review flag.
+        - NEVER overwrites explicit patient-elicited answers unless explicitly instructed.
+        - Never turns unextracted fields into negatives.
+        """
+        from ayusetu.common.session_cache import SessionCache
+        cache = SessionCache()
+        session_data = cache.get_session(session_id)
+        if not session_data:
+            return []
+
+        doc = self.get_document(document_id)
+        if not doc or not doc.entities:
+            return []
+
+        current_slots = session_data.get("slots", [])
+        # Convert slots dict to list format if necessary
+        slots_list: List[Dict[str, Any]] = []
+        if isinstance(current_slots, dict):
+            for k, v in current_slots.items():
+                slots_list.append({
+                    "path": k,
+                    "value": v,
+                    "source": "utterance",
+                    "reported_by": "patient",
+                    "elicited": True,
+                })
+        elif isinstance(current_slots, list):
+            slots_list = list(current_slots)
+
+        existing_paths = {s.get("path") for s in slots_list if isinstance(s, dict)}
+        patient_elicited_paths = {
+            s.get("path") for s in slots_list
+            if isinstance(s, dict) and s.get("source") in ("utterance", "touch") and s.get("reported_by") == "patient"
+        }
+
+        integrated_slots: List[Dict[str, Any]] = []
+
+        for entity in doc.entities:
+            etype = entity.entity_type.value if hasattr(entity.entity_type, "value") else str(entity.entity_type)
+
+            # Map entity to canonical clinical slot path
+            if etype == "medication":
+                slot_path = f"medications.{entity.normalised or entity.raw_text}"
+            elif etype == "allergy":
+                slot_path = f"allergies.{entity.normalised or entity.raw_text}"
+            elif etype == "vital":
+                slot_path = f"vitals.{entity.normalised or entity.raw_text}"
+            elif etype in ("condition", "diagnosis"):
+                slot_path = f"past_medical_history.{entity.normalised or entity.raw_text}"
+            elif etype == "lab":
+                slot_path = f"labs.{entity.normalised or entity.raw_text}"
+            else:
+                slot_path = f"document.{etype}.{entity.normalised or entity.raw_text}"
+
+            # Check if patient already answered this slot
+            if slot_path in patient_elicited_paths and not overwrite_patient:
+                # Retain patient's explicit answer as authoritative; do not overwrite
+                continue
+
+            slot_entry = {
+                "id": str(uuid6.uuid7()),
+                "path": slot_path,
+                "value": entity.normalised or entity.raw_text,
+                "value_coded": entity.code,
+                "confidence": entity.confidence,
+                "source": "document",
+                "source_ref": document_id,
+                "reported_by": "patient",
+                "elicited": True,
+                "needs_review": entity.needs_review,
+                "code_system": entity.code_system,
+                "page_no": entity.page_no,
+            }
+
+            # Update existing slot if present or append new slot
+            found_idx = next((i for i, s in enumerate(slots_list) if isinstance(s, dict) and s.get("path") == slot_path), None)
+            if found_idx is not None:
+                if overwrite_patient or slots_list[found_idx].get("source") == "document":
+                    slots_list[found_idx] = slot_entry
+            else:
+                slots_list.append(slot_entry)
+
+            integrated_slots.append(slot_entry)
+
+        cache.update_session(session_id, {"slots": slots_list})
+        return integrated_slots
 
     def get_document(self, document_id: str) -> Optional[DocumentAIResult]:
         """Retrieve stored DocumentAIResult by document ID."""

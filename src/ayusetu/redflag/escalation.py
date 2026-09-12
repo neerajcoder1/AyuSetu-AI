@@ -7,7 +7,7 @@ Validates state transitions and prevents unauthorized or contradictory lifecycle
 
 from typing import Dict, Set
 from ayusetu.redflag.models import RedFlagStatus
-from ayusetu.gateway.errors import ErrorCode, AyuSetuGatewayError
+
 
 
 class RedFlagLifecycle:
@@ -41,6 +41,7 @@ class RedFlagLifecycle:
 
         allowed = cls.VALID_TRANSITIONS.get(current, set())
         if target not in allowed:
+            from ayusetu.gateway.errors import ErrorCode, AyuSetuGatewayError
             raise AyuSetuGatewayError(
                 ErrorCode.UNPROCESSABLE_ENTITY,
                 f"Invalid red-flag transition: cannot transition alert from '{current.value}' to '{target.value}'",

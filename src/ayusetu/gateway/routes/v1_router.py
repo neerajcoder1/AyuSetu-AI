@@ -13,6 +13,7 @@ from ayusetu.audit.routes import router as audit_router
 from ayusetu.redflag.routes import router as redflag_router
 from ayusetu.deid.routes import router as deid_router
 from ayusetu.gateway.routes.metrics import router as metrics_router
+from ayusetu.gateway.routes.dialogue_ws import router as dialogue_ws_router
 
 v1_router = APIRouter(prefix="/api/v1")
 
@@ -31,6 +32,8 @@ v1_router.include_router(deid_router)
 # Mount operational metrics routes
 v1_router.include_router(metrics_router)
 
+# Mount dialogue WebSocket routes
+v1_router.include_router(dialogue_ws_router)
+
 # Mount stubs and REST endpoints under /api/v1
 v1_router.include_router(stubs_router)
-
