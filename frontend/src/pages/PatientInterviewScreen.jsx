@@ -1,8 +1,21 @@
 import React, { useState, useRef } from 'react';
-import { Bot, User, Volume2, ArrowRight, MessageSquare, AlertCircle, Globe, FileText, Upload, CheckCircle2, ShieldCheck } from 'lucide-react';
+import {
+  Bot,
+  User,
+  Volume2,
+  ArrowRight,
+  MessageSquare,
+  AlertCircle,
+  Globe,
+  FileText,
+  Upload,
+  CheckCircle2,
+  Sparkles,
+} from 'lucide-react';
 import AudioRecorder from '../components/AudioRecorder';
 import SlotChecklist from '../components/SlotChecklist';
 import DocumentUploadModal from '../components/DocumentUploadModal';
+import BodyMapSelector from '../components/BodyMapSelector';
 import { api } from '../services/api';
 
 export default function PatientInterviewScreen({
@@ -21,6 +34,7 @@ export default function PatientInterviewScreen({
   const [playingAudioIndex, setPlayingAudioIndex] = useState(null);
   const [autoPlayNotice, setAutoPlayNotice] = useState(null);
   const [isDocModalOpen, setIsDocModalOpen] = useState(false);
+  const [bodyMapSummary, setBodyMapSummary] = useState('');
   const [error, setError] = useState(null);
 
   const currentAudioRef = useRef(null);
@@ -28,6 +42,19 @@ export default function PatientInterviewScreen({
 
   // Synchronously primed audio instance to preserve user activation gesture across async API requests
   const primedAudioRef = useRef(null);
+
+  const handleBodyMapLocationChange = (locations, summaryString) => {
+    setBodyMapSummary(summaryString);
+    if (dialogueState && summaryString) {
+      if (!dialogueState.collected_info) {
+        dialogueState.collected_info = {};
+      }
+      dialogueState.collected_info.location = summaryString;
+      if (dialogueState.missing_slots) {
+        dialogueState.missing_slots = dialogueState.missing_slots.filter((s) => s !== 'location');
+      }
+    }
+  };
 
   const handleSendTurn = async (audioBlob) => {
     if (!sessionId) {
@@ -71,16 +98,6 @@ export default function PatientInterviewScreen({
     try {
       const turnRes = await api.sendTurn(sessionId, audioBlob);
 
-      // Diagnostic logging of raw turn response audio payload
-      console.log('[AudioDiag] Turn API response received:', {
-        hasResponseAudio: Boolean(turnRes.response_audio),
-        b64Length: turnRes.response_audio ? turnRes.response_audio.length : 0,
-        sampleRate: turnRes.response_sample_rate,
-        duration: turnRes.response_duration,
-        detectedLang: turnRes.detected_language,
-        responseTextPreview: turnRes.response_text ? turnRes.response_text.substring(0, 50) : null,
-      });
-
       // Low confidence alert check
       if (turnRes.low_confidence) {
         setLowConfidenceWarning(true);
@@ -103,12 +120,12 @@ export default function PatientInterviewScreen({
 
       setTurns((prev) => [...prev, newTurn]);
 
-      // Automatically play the returned TTS response audio once
+      // Automatically play returned TTS response audio
       if (turnRes.response_audio) {
         handlePlayTTS(turnRes.response_audio, newTurnIndex, true);
       }
 
-      // Trigger parent update (re-fetches state)
+      // Trigger parent update
       if (onTurnCompleted) {
         onTurnCompleted(turnRes);
       }
@@ -126,7 +143,6 @@ export default function PatientInterviewScreen({
       return;
     }
 
-    // Stop and clean up any currently playing audio
     if (currentAudioRef.current) {
       currentAudioRef.current.pause();
       currentAudioRef.current.onended = null;
@@ -141,7 +157,6 @@ export default function PatientInterviewScreen({
     }
 
     try {
-      // Decode base64 to binary byte array
       const binaryString = window.atob(audioB64);
       const len = binaryString.length;
       const bytes = new Uint8Array(len);
@@ -149,18 +164,12 @@ export default function PatientInterviewScreen({
         bytes[i] = binaryString.charCodeAt(i);
       }
 
-      // Create Blob and Object URL for native browser media element playback
       const blob = new Blob([bytes], { type: 'audio/wav' });
       const blobUrl = URL.createObjectURL(blob);
       currentAudioUrlRef.current = blobUrl;
 
-      // Prefer the pre-primed Audio element to retain user activation permission across async boundaries
       const audio = primedAudioRef.current || new Audio();
       currentAudioRef.current = audio;
-
-      console.log('[AudioDiag] Real TTS source assigned:', blobUrl);
-      console.log('[AudioDiag] Real TTS blob size:', blob.size, 'bytes');
-      console.log('[AudioDiag] Real TTS blob type:', blob.type);
 
       setPlayingAudioIndex(index);
 
@@ -182,16 +191,12 @@ export default function PatientInterviewScreen({
       };
 
       audio.onended = () => {
-        console.log('[AudioDiag] REAL TTS playback finished');
         cleanup();
       };
 
       audio.onerror = (e) => {
-        console.error('[AudioDiag] Real TTS HTMLAudioElement load/playback error:', e, audio.error);
         cleanup();
       };
-
-      console.log('[AudioDiag] waiting for media readiness');
 
       let hasTriggeredPlay = false;
 
@@ -199,39 +204,27 @@ export default function PatientInterviewScreen({
         if (hasTriggeredPlay) return;
         hasTriggeredPlay = true;
 
-        console.log('[AudioDiag] loadedmetadata / readiness event fired');
-        console.log('[AudioDiag] actual TTS duration:', audio.duration);
-        console.log('[AudioDiag] readyState:', audio.readyState);
-
         const playPromise = audio.play();
         if (playPromise !== undefined) {
           playPromise.then(() => {
-            console.log('[AudioDiag] play() succeeded for REAL TTS audio. Duration =', audio.duration);
             setAutoPlayNotice(null);
           }).catch((err) => {
-            console.warn('[AudioDiag] play() rejected/blocked for REAL TTS audio:', err);
             cleanup();
             if (isAutoPlay) {
-              setAutoPlayNotice('Tap Play Audio to hear the response.');
+              setAutoPlayNotice('Tap Play Audio to hear the AI response.');
             }
           });
         }
-      };
-
-      audio.onloadedmetadata = () => {
-        console.log('[AudioDiag] loadedmetadata fired. actual TTS duration:', audio.duration);
       };
 
       audio.oncanplay = () => {
         triggerPlay();
       };
 
-      // Pause old media, set new source URL, and force reload
       audio.pause();
       audio.src = blobUrl;
       audio.load();
 
-      // Fallback check if media is already ready synchronously
       if (audio.readyState >= 3 && !hasTriggeredPlay) {
         triggerPlay();
       }
@@ -245,74 +238,80 @@ export default function PatientInterviewScreen({
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-      {/* Intro Banner */}
-      <div className="bg-gradient-to-r from-medical-700 via-medical-600 to-sky-600 rounded-2xl p-6 text-white shadow-lg flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        <div>
-          <span className="bg-white/20 text-white font-semibold text-xs px-2.5 py-1 rounded-full uppercase tracking-wider mb-2 inline-block">
-            Voice Intake Assistant
-          </span>
-          <h2 className="text-xl sm:text-2xl font-extrabold tracking-tight">
-            AyuSetu Patient Consultation Intake
-          </h2>
-          <p className="text-sky-100 text-xs sm:text-sm mt-1 max-w-xl">
-            Speak naturally in Hindi, Hinglish, or English. AyuSetu extracts clinical symptoms and asks relevant follow-up questions.
-          </p>
-        </div>
-
-        <button
-          onClick={onGoToDoctorDashboard}
-          className="flex items-center space-x-2 bg-white text-medical-800 hover:bg-sky-50 font-bold text-xs sm:text-sm px-4 py-2.5 rounded-xl shadow-md transition-all shrink-0"
-        >
-          <span>Open Doctor Dashboard</span>
-          <ArrowRight className="w-4 h-4" />
-        </button>
-      </div>
-
-      {/* Session Preferred Language Selection Bar */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-        <div className="flex items-center space-x-3">
-          <div className="p-2 bg-sky-100 text-sky-700 rounded-xl">
-            <Globe className="w-5 h-5" />
-          </div>
-          <div>
-            <h4 className="font-bold text-slate-900 text-xs sm:text-sm">Patient Preferred Language</h4>
-            <p className="text-[11px] text-slate-500">
-              Select your preferred response language for this intake session.
+      {/* Compact Hospital Clinical Header */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-3">
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-slate-100 pb-3">
+          <div className="space-y-1">
+            <div className="flex items-center space-x-2">
+              <span className="text-[10px] font-extrabold uppercase tracking-wider text-sky-700 bg-sky-50 border border-sky-200/80 px-2.5 py-0.5 rounded-full">
+                PATIENT CONSULTATION
+              </span>
+              <span className="text-slate-300">•</span>
+              {/* Dynamic Consultation Status Badge */}
+              <div className="inline-flex items-center space-x-1.5 text-xs font-bold">
+                <span className="text-slate-500 font-medium">Consultation Status:</span>
+                {sessionId ? (
+                  <span className="inline-flex items-center space-x-1 text-emerald-700 font-bold bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full text-[11px]">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    <span>Active</span>
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center space-x-1 text-amber-700 font-bold bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full text-[11px]">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                    <span>Not Started</span>
+                  </span>
+                )}
+              </div>
+            </div>
+            <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight">
+              Let's understand what you're experiencing.
+            </h1>
+            <p className="text-xs text-slate-600 font-normal leading-relaxed max-w-3xl">
+              Tell AyuSetu about your symptoms in your own words. You can speak naturally, use the body map to point to problem areas, or upload supporting medical reports.
             </p>
           </div>
+
+          {onGoToDoctorDashboard && (
+            <button
+              onClick={onGoToDoctorDashboard}
+              className="flex items-center space-x-2 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs px-3.5 py-2 rounded-xl shadow-sm transition-all shrink-0"
+            >
+              <span>Open Physician Cockpit</span>
+              <ArrowRight className="w-3.5 h-3.5 text-sky-400" />
+            </button>
+          )}
         </div>
 
-        <div className="flex items-center space-x-1.5 bg-slate-100 p-1 rounded-xl border border-slate-200 shrink-0">
-          {[
-            { id: 'hi', label: 'Hindi (हिन्दी)' },
-            { id: 'hinglish', label: 'Hinglish' },
-            { id: 'en', label: 'English' },
-          ].map((lang) => (
-            <button
-              key={lang.id}
-              onClick={() => onLanguageChange && onLanguageChange(lang.id)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                preferredLanguage === lang.id
-                  ? 'bg-medical-600 text-white shadow-sm'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
-              }`}
-            >
-              {lang.label}
-            </button>
-          ))}
+        {/* Voice-First Clinical Interaction Guidance Panel */}
+        <div className="flex items-center justify-between bg-sky-50/70 border border-sky-200/80 rounded-xl p-3 text-xs">
+          <div className="flex items-center space-x-2.5">
+            <div className="p-2 bg-sky-600 text-white rounded-lg shadow-sm">
+              <MessageSquare className="w-4 h-4" />
+            </div>
+            <div>
+              <span className="font-bold text-sky-950 block">🎙 Voice-First Consultation Intake</span>
+              <span className="text-[11px] text-sky-800 font-medium">
+                Speak naturally in Hindi, Hinglish, or English. Tap the microphone control below to record your response.
+              </span>
+            </div>
+          </div>
+          <span className="hidden sm:inline-block text-[10px] font-bold uppercase tracking-wider text-sky-700 bg-white border border-sky-200 px-2.5 py-1 rounded-lg">
+            Patient Intake Active
+          </span>
         </div>
       </div>
 
-      {/* Medical Document Upload Card for Patient */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-3">
+
+      {/* Patient Medical Document Upload Card */}
+      <div className="bg-white border border-slate-200/90 rounded-2xl p-4 sm:p-5 shadow-sm space-y-3">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
           <div className="flex items-center space-x-3">
-            <div className="p-2.5 bg-sky-100 text-sky-700 rounded-xl">
+            <div className="p-2.5 bg-sky-50 text-sky-700 rounded-xl border border-sky-200">
               <FileText className="w-5 h-5" />
             </div>
             <div>
               <h4 className="font-bold text-slate-900 text-xs sm:text-sm">Upload Medical Document</h4>
-              <p className="text-[11px] text-slate-500">
+              <p className="text-[11px] text-slate-500 font-medium">
                 Have lab reports, prescriptions, or medical records? Automated OCR will scan and extract findings for doctor review.
               </p>
             </div>
@@ -326,22 +325,22 @@ export default function PatientInterviewScreen({
           </button>
         </div>
 
-        {/* Display Patient Uploaded Documents list if available */}
+        {/* Display Patient Uploaded Documents list */}
         {patientDocs.length > 0 && (
-          <div className="pt-2 border-t border-slate-100 space-y-2">
+          <div className="pt-3 border-t border-slate-100 space-y-2">
             <span className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block">
               Attached Medical Documents ({patientDocs.length})
             </span>
             <div className="space-y-2">
               {patientDocs.map((doc, idx) => (
-                <div key={idx} className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs space-y-1">
+                <div key={idx} className="p-3 bg-slate-50/80 border border-slate-200/90 rounded-xl text-xs space-y-1.5">
                   <div className="flex items-center justify-between">
-                    <span className="font-semibold text-slate-800 flex items-center space-x-1.5">
-                      <FileText className="w-3.5 h-3.5 text-sky-600" />
+                    <span className="font-bold text-slate-900 flex items-center space-x-1.5">
+                      <FileText className="w-3.5 h-3.5 text-sky-700" />
                       <span>{doc.filename}</span>
                     </span>
-                    <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-full flex items-center space-x-1">
-                      <CheckCircle2 className="w-3 h-3" />
+                    <span className="text-[10px] bg-emerald-100 text-emerald-900 font-bold px-2.5 py-0.5 rounded-full flex items-center space-x-1">
+                      <CheckCircle2 className="w-3 h-3 text-emerald-600" />
                       <span>Confirmed for Doctor Review</span>
                     </span>
                   </div>
@@ -353,7 +352,7 @@ export default function PatientInterviewScreen({
                       <div className="flex flex-wrap gap-1">
                         {doc.entities.map((e, ei) => (
                           <span key={ei} className="px-2 py-0.5 bg-white border border-slate-200 text-[10px] text-slate-700 rounded-md">
-                            <strong className="text-sky-700 uppercase">{e.entity_type}:</strong> {e.raw_text}
+                            <strong className="text-sky-700 uppercase font-bold">{e.entity_type}:</strong> {e.raw_text}
                           </span>
                         ))}
                       </div>
@@ -374,14 +373,14 @@ export default function PatientInterviewScreen({
       )}
 
       {autoPlayNotice && (
-        <div className="p-3 bg-sky-50 border border-sky-200 text-sky-800 text-xs rounded-xl flex items-center justify-between shadow-sm">
+        <div className="p-3.5 bg-sky-50 border border-sky-200 text-sky-900 text-xs rounded-xl flex items-center justify-between shadow-sm">
           <div className="flex items-center space-x-2">
             <Volume2 className="w-4 h-4 text-sky-600 shrink-0" />
             <span className="font-semibold">{autoPlayNotice}</span>
           </div>
           <button
             onClick={() => setAutoPlayNotice(null)}
-            className="text-sky-600 hover:text-sky-900 font-bold text-xs"
+            className="text-sky-700 hover:text-sky-900 font-bold text-xs"
           >
             Dismiss
           </button>
@@ -390,8 +389,14 @@ export default function PatientInterviewScreen({
 
       {/* Main Grid Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left Column: Conversation & Recorder (7 cols) */}
+        {/* Left Column: Conversation, Body Map & Recorder (7 cols) */}
         <div className="lg:col-span-7 space-y-6">
+          {/* Interactive Symptom & Pain Location Mapping */}
+          <BodyMapSelector
+            onLocationChange={handleBodyMapLocationChange}
+            voiceReportedLocation={dialogueState?.collected_info?.location || null}
+          />
+
           {/* Voice Recorder Component */}
           <AudioRecorder
             onSendTurn={handleSendTurn}
@@ -400,68 +405,73 @@ export default function PatientInterviewScreen({
           />
 
           {/* Live Dialogue Transcript Stream */}
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-4">
+          <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-5 sm:p-6 space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <div className="flex items-center space-x-2">
-                <MessageSquare className="w-4 h-4 text-medical-600" />
-                <h3 className="font-semibold text-slate-900 text-sm sm:text-base">
-                  Live Conversation Log
-                </h3>
+                <div className="p-2 bg-sky-50 text-sky-700 rounded-xl">
+                  <MessageSquare className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-900 text-sm sm:text-base">
+                    Live Conversation Log
+                  </h3>
+                  <p className="text-xs text-slate-500">Real-time ASR transcript & AI responses</p>
+                </div>
               </div>
-              <span className="text-xs text-slate-400 font-medium">
+              <span className="text-xs text-slate-500 font-bold bg-slate-100 px-2.5 py-1 rounded-full border border-slate-200">
                 {turns.length} Turn{turns.length === 1 ? '' : 's'}
               </span>
             </div>
 
             {turns.length === 0 ? (
-              <div className="text-center py-10 space-y-2">
+              <div className="text-center py-10 space-y-2 bg-slate-50/60 rounded-xl border border-slate-100">
                 <Bot className="w-10 h-10 text-slate-300 mx-auto" />
-                <p className="text-xs text-slate-500 font-medium">
+                <p className="text-xs text-slate-600 font-bold">
                   No conversation turns recorded yet.
                 </p>
                 <p className="text-[11px] text-slate-400">
-                  Tap the microphone above to begin your intake.
+                  Tap the microphone above or interact with the body map to begin.
                 </p>
               </div>
             ) : (
-              <div className="space-y-4 max-h-[400px] overflow-y-auto pr-1">
+              <div className="space-y-4 max-h-[420px] overflow-y-auto pr-1">
                 {turns.map((turn, index) => (
                   <div key={turn.id} className="space-y-2">
                     {/* Patient Bubble */}
                     <div className="flex items-start space-x-2 justify-end">
-                      <div className="bg-medical-600 text-white rounded-2xl rounded-tr-none px-4 py-2.5 text-xs sm:text-sm max-w-[85%] shadow-sm space-y-1">
-                        <div className="flex items-center justify-between space-x-2 text-[10px] text-sky-200 border-b border-white/20 pb-1">
+                      <div className="bg-sky-600 text-white rounded-2xl rounded-tr-none px-4 py-3 text-xs sm:text-sm max-w-[85%] shadow-sm space-y-1.5">
+                        <div className="flex items-center justify-between space-x-2 text-[10px] text-sky-100 border-b border-white/20 pb-1">
                           <span className="font-bold">Patient</span>
                           <span>
                             Lang: {turn.language.toUpperCase()} | Conf: {(turn.confidence * 100).toFixed(0)}%
                           </span>
                         </div>
-                        <p className="leading-relaxed">{turn.patientText}</p>
+                        <p className="leading-relaxed font-medium">{turn.patientText}</p>
                       </div>
-                      <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 shrink-0 text-xs font-bold">
+                      <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 shrink-0 text-xs font-bold shadow-sm">
                         <User className="w-4 h-4" />
                       </div>
                     </div>
 
                     {/* AI Response Bubble */}
                     <div className="flex items-start space-x-2 justify-start">
-                      <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-medical-600 to-sky-500 flex items-center justify-center text-white shrink-0 text-xs font-bold shadow-sm">
+                      <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-sky-600 to-teal-500 flex items-center justify-center text-white shrink-0 text-xs font-bold shadow-sm">
                         <Bot className="w-4 h-4" />
                       </div>
-                      <div className="bg-slate-100 border border-slate-200 text-slate-800 rounded-2xl rounded-tl-none px-4 py-2.5 text-xs sm:text-sm max-w-[85%] space-y-2">
+                      <div className="bg-slate-50 border border-slate-200/90 text-slate-900 rounded-2xl rounded-tl-none px-4 py-3 text-xs sm:text-sm max-w-[85%] space-y-2 shadow-sm">
                         <div className="flex items-center justify-between text-[10px] text-slate-500 border-b border-slate-200/80 pb-1">
-                          <span className="font-bold text-medical-800">AyuSetu AI Assistant</span>
+                          <span className="font-bold text-sky-800">AyuSetu AI Assistant</span>
                           {turn.aiAudioB64 && (
                             <button
                               onClick={() => handlePlayTTS(turn.aiAudioB64, index)}
-                              className="flex items-center space-x-1 text-medical-700 hover:text-medical-900 font-semibold"
+                              className="flex items-center space-x-1 text-sky-700 hover:text-sky-900 font-bold"
                             >
                               <Volume2 className="w-3.5 h-3.5" />
-                              <span>{playingAudioIndex === index ? 'Playing...' : 'Play Audio'}</span>
+                              <span>{playingAudioIndex === index ? 'Playing...' : 'Play Response Audio'}</span>
                             </button>
                           )}
                         </div>
-                        <p className="leading-relaxed font-medium">{turn.aiResponseText}</p>
+                        <p className="leading-relaxed font-semibold">{turn.aiResponseText}</p>
                       </div>
                     </div>
                   </div>

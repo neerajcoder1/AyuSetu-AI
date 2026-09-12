@@ -134,4 +134,12 @@ export const api = {
     });
     return handleResponse(res);
   },
+
+  // Check application health using GET /health
+  async checkHealth() {
+    const res = await fetch(`${API_BASE_URL}/health`, {
+      method: 'GET',
+    });
+    return handleResponse(res);
+  },
 };
