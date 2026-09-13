@@ -45,6 +45,7 @@ class SessionCreateRequest(BaseModel):
 
 class SessionCreateResponse(BaseModel):
     session_id: str
+    encounter_id: Optional[str] = None
     preferred_language: Optional[str] = "hinglish"
 
 class LanguageUpdateRequest(BaseModel):
@@ -129,7 +130,13 @@ def health_check():
 def create_session(req: Optional[SessionCreateRequest] = None):
     preferred_lang = req.preferred_language if req and req.preferred_language else "hinglish"
     session_id = voice_pipeline.create_session(preferred_language=preferred_lang)
-    return SessionCreateResponse(session_id=session_id, preferred_language=preferred_lang)
+    session_obj = voice_pipeline.get_session(session_id)
+    encounter_id = getattr(session_obj, "encounter_id", session_id)
+    return SessionCreateResponse(
+        session_id=session_id,
+        encounter_id=encounter_id,
+        preferred_language=preferred_lang
+    )
 
 @app.patch("/sessions/{session_id}/language")
 def update_language(session_id: str, req: LanguageUpdateRequest):

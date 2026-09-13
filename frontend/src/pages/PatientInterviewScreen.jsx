@@ -3,6 +3,9 @@ import {
   Bot,
   User,
   Volume2,
+  Play,
+  Pause,
+  RotateCcw,
   ArrowRight,
   MessageSquare,
   AlertCircle,
@@ -16,6 +19,7 @@ import AudioRecorder from '../components/AudioRecorder';
 import SlotChecklist from '../components/SlotChecklist';
 import DocumentUploadModal from '../components/DocumentUploadModal';
 import BodyMapSelector from '../components/BodyMapSelector';
+import AIProcessingVisual from '../components/AIProcessingVisual';
 import { api } from '../services/api';
 
 export default function PatientInterviewScreen({
@@ -31,7 +35,7 @@ export default function PatientInterviewScreen({
   const [turns, setTurns] = useState([]);
   const [isSendingTurn, setIsSendingTurn] = useState(false);
   const [lowConfidenceWarning, setLowConfidenceWarning] = useState(false);
-  const [playingAudioIndex, setPlayingAudioIndex] = useState(null);
+  const [activeAudioState, setActiveAudioState] = useState({ index: null, status: 'idle' });
   const [autoPlayNotice, setAutoPlayNotice] = useState(null);
   const [isDocModalOpen, setIsDocModalOpen] = useState(false);
   const [bodyMapSummary, setBodyMapSummary] = useState('');
@@ -69,6 +73,7 @@ export default function PatientInterviewScreen({
       currentAudioRef.current.onerror = null;
       currentAudioRef.current = null;
     }
+    setActiveAudioState({ index: null, status: 'idle' });
 
     // Synchronously prime/unlock HTMLAudioElement during user click gesture before async fetch boundary
     try {
@@ -116,13 +121,14 @@ export default function PatientInterviewScreen({
         aiResponseText: turnRes.response_text || 'Samajh gaya, kripya aage batayein.',
         aiAudioB64: turnRes.response_audio,
         redFlags: turnRes.red_flags || [],
+        preferredLanguage: turnRes.preferred_language || preferredLanguage,
       };
 
       setTurns((prev) => [...prev, newTurn]);
 
       // Automatically play returned TTS response audio
       if (turnRes.response_audio) {
-        handlePlayTTS(turnRes.response_audio, newTurnIndex, true);
+        playTurnAudio(turnRes.response_audio, newTurnIndex, true);
       }
 
       // Trigger parent update
@@ -137,9 +143,10 @@ export default function PatientInterviewScreen({
     }
   };
 
-  const handlePlayTTS = (audioB64, index, isAutoPlay = false) => {
+  const playTurnAudio = (audioB64, index, isAutoPlay = false) => {
     if (!audioB64) {
-      console.warn('[AudioDiag] handlePlayTTS called with empty audioB64');
+      console.warn('[AudioDiag] playTurnAudio called with empty audioB64 for turn index:', index);
+      setActiveAudioState({ index, status: 'error' });
       return;
     }
 
@@ -171,10 +178,10 @@ export default function PatientInterviewScreen({
       const audio = primedAudioRef.current || new Audio();
       currentAudioRef.current = audio;
 
-      setPlayingAudioIndex(index);
+      setActiveAudioState({ index, status: 'playing' });
 
-      const cleanup = () => {
-        setPlayingAudioIndex(null);
+      const cleanup = (finalStatus = 'idle') => {
+        setActiveAudioState({ index, status: finalStatus });
         if (audio) {
           audio.onended = null;
           audio.onerror = null;
@@ -191,11 +198,12 @@ export default function PatientInterviewScreen({
       };
 
       audio.onended = () => {
-        cleanup();
+        cleanup('ended');
       };
 
       audio.onerror = (e) => {
-        cleanup();
+        console.error('[AudioDiag] Real TTS playback exception event:', e);
+        cleanup('error');
       };
 
       let hasTriggeredPlay = false;
@@ -206,14 +214,18 @@ export default function PatientInterviewScreen({
 
         const playPromise = audio.play();
         if (playPromise !== undefined) {
-          playPromise.then(() => {
-            setAutoPlayNotice(null);
-          }).catch((err) => {
-            cleanup();
-            if (isAutoPlay) {
-              setAutoPlayNotice('Tap Play Audio to hear the AI response.');
-            }
-          });
+          playPromise
+            .then(() => {
+              setAutoPlayNotice(null);
+              setActiveAudioState({ index, status: 'playing' });
+            })
+            .catch((err) => {
+              console.warn('[AudioDiag] Play promise rejected:', err);
+              cleanup('idle');
+              if (isAutoPlay) {
+                setAutoPlayNotice('Tap "Listen to response" below to hear the AI response.');
+              }
+            });
         }
       };
 
@@ -230,7 +242,40 @@ export default function PatientInterviewScreen({
       }
     } catch (e) {
       console.error('[AudioDiag] Real TTS playback exception:', e);
-      setPlayingAudioIndex(null);
+      setActiveAudioState({ index, status: 'error' });
+    }
+  };
+
+  const handleToggleAudio = (turn, index) => {
+    const isCurrentTurn = activeAudioState.index === index;
+    const currentStatus = isCurrentTurn ? activeAudioState.status : 'idle';
+
+    if (!turn.aiAudioB64) {
+      setActiveAudioState({ index, status: 'error' });
+      return;
+    }
+
+    if (isCurrentTurn && currentStatus === 'playing') {
+      if (currentAudioRef.current) {
+        currentAudioRef.current.pause();
+        setActiveAudioState({ index, status: 'paused' });
+      }
+    } else if (isCurrentTurn && currentStatus === 'paused') {
+      if (currentAudioRef.current) {
+        currentAudioRef.current
+          .play()
+          .then(() => {
+            setActiveAudioState({ index, status: 'playing' });
+          })
+          .catch((e) => {
+            console.warn('[AudioDiag] Resume failed:', e);
+            playTurnAudio(turn.aiAudioB64, index, false);
+          });
+      } else {
+        playTurnAudio(turn.aiAudioB64, index, false);
+      }
+    } else {
+      playTurnAudio(turn.aiAudioB64, index, false);
     }
   };
 
@@ -404,6 +449,11 @@ export default function PatientInterviewScreen({
             lowConfidenceWarning={lowConfidenceWarning}
           />
 
+          {/* Active Clinical AI Processing Visualization */}
+          {isSendingTurn && (
+            <AIProcessingVisual message="AyuSetu AI is analyzing your response..." />
+          )}
+
           {/* Live Dialogue Transcript Stream */}
           <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm p-5 sm:p-6 space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
@@ -443,7 +493,7 @@ export default function PatientInterviewScreen({
                         <div className="flex items-center justify-between space-x-2 text-[10px] text-sky-100 border-b border-white/20 pb-1">
                           <span className="font-bold">Patient</span>
                           <span>
-                            Lang: {turn.language.toUpperCase()} | Conf: {(turn.confidence * 100).toFixed(0)}%
+                            ASR: {turn.language.toUpperCase()} | Session: {(turn.preferredLanguage || preferredLanguage).toUpperCase()} | Conf: {(turn.confidence * 100).toFixed(0)}%
                           </span>
                         </div>
                         <p className="leading-relaxed font-medium">{turn.patientText}</p>
@@ -461,17 +511,58 @@ export default function PatientInterviewScreen({
                       <div className="bg-slate-50 border border-slate-200/90 text-slate-900 rounded-2xl rounded-tl-none px-4 py-3 text-xs sm:text-sm max-w-[85%] space-y-2 shadow-sm">
                         <div className="flex items-center justify-between text-[10px] text-slate-500 border-b border-slate-200/80 pb-1">
                           <span className="font-bold text-sky-800">AyuSetu AI Assistant</span>
-                          {turn.aiAudioB64 && (
-                            <button
-                              onClick={() => handlePlayTTS(turn.aiAudioB64, index)}
-                              className="flex items-center space-x-1 text-sky-700 hover:text-sky-900 font-bold"
-                            >
-                              <Volume2 className="w-3.5 h-3.5" />
-                              <span>{playingAudioIndex === index ? 'Playing...' : 'Play Response Audio'}</span>
-                            </button>
-                          )}
+                          <span className="text-[10px] font-medium text-slate-400">Clinical Voice Response</span>
                         </div>
                         <p className="leading-relaxed font-semibold">{turn.aiResponseText}</p>
+
+                        {/* Dedicated Visible Clinical Audio Playback Control */}
+                        <div className="pt-2 border-t border-slate-200/80 mt-2">
+                          {turn.aiAudioB64 ? (
+                            (() => {
+                              const isCurrent = activeAudioState.index === index;
+                              const status = isCurrent ? activeAudioState.status : 'idle';
+
+                              let buttonLabel = 'Listen to response';
+                              let ButtonIcon = Volume2;
+                              let buttonStyle = 'bg-sky-50 text-sky-800 border-sky-200/90 hover:bg-sky-100 hover:border-sky-300';
+
+                              if (isCurrent && status === 'playing') {
+                                buttonLabel = 'Playing... (Pause)';
+                                ButtonIcon = Pause;
+                                buttonStyle = 'bg-sky-600 text-white border-sky-700 shadow-sm animate-pulse';
+                              } else if (isCurrent && status === 'paused') {
+                                buttonLabel = 'Resume playback';
+                                ButtonIcon = Play;
+                                buttonStyle = 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100';
+                              } else if (isCurrent && status === 'ended') {
+                                buttonLabel = 'Play again';
+                                ButtonIcon = RotateCcw;
+                                buttonStyle = 'bg-slate-100 text-slate-800 border-slate-300 hover:bg-slate-200';
+                              } else if (isCurrent && status === 'error') {
+                                buttonLabel = 'Audio playback error (Retry)';
+                                ButtonIcon = AlertCircle;
+                                buttonStyle = 'bg-red-50 text-red-700 border-red-200 hover:bg-red-100';
+                              }
+
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleAudio(turn, index)}
+                                  className={`inline-flex items-center space-x-2 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all shadow-xs ${buttonStyle}`}
+                                  aria-label={buttonLabel}
+                                >
+                                  <ButtonIcon className="w-3.5 h-3.5 shrink-0" />
+                                  <span>{buttonLabel}</span>
+                                </button>
+                              );
+                            })()
+                          ) : (
+                            <div className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl border border-slate-200 bg-slate-100/70 text-slate-500 text-xs font-medium">
+                              <AlertCircle className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                              <span>Audio unavailable</span>
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>

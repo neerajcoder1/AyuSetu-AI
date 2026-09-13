@@ -47,6 +47,7 @@ _HINGLISH_STRONG_MARKERS = {
     "kaise", "kaisa", "raha", "rahi", "rahe", "thik", "theek", "dawa",
     "dawai", "goli", "ulti", "ultee", "chakkar", "chhati", "gala",
     "khansi", "nahin", "nhi", "aaya", "aayi", "aaye", "gaya", "gayi", "gaye",
+    "namaste", "namaskar", "dhanyavaad", "shukriya", "kripya", "kripaya",
 }
 
 _HINGLISH_GRAMMAR_MARKERS = {
@@ -244,7 +245,7 @@ def infer_language_from_text(text: str) -> str:
         strong_hits = sum(1 for w in words if w in _HINGLISH_STRONG_MARKERS)
         grammar_hits = sum(1 for w in words if w in _HINGLISH_GRAMMAR_MARKERS)
         score = (strong_hits * 2) + grammar_hits
-        if score >= 3 and (strong_hits >= 1 or grammar_hits >= 2):
+        if strong_hits >= 1 or (grammar_hits >= 2 and score >= 3):
             return "hinglish"
         return "en"
     else:
