@@ -59,18 +59,15 @@ class TestVoicePipelineLowConfidence(unittest.TestCase):
 
         # Verify low_confidence flag is True.
         self.assertTrue(result["low_confidence"], "Result should indicate low confidence")
-        # Response fields should be None / empty.
-        self.assertIsNone(result["response_text"], "No response text should be generated for low confidence")
-        self.assertIsNone(result["response_audio"], "No audio should be generated for low confidence")
-        self.assertIsNone(result["response_sample_rate"], "No sample rate for low confidence")
-        self.assertIsNone(result["response_duration"], "No duration for low confidence")
+        # Clarification re-prompt text and audio should be returned for patient UX.
+        self.assertIsNotNone(result["response_text"], "Re-prompt response text should be generated for low confidence")
+        self.assertIsNotNone(result["response_audio"], "Re-prompt audio should be generated for low confidence")
 
         # Ensure ASR was called.
         mock_transcribe.assert_called_once()
-        # Ensure DialogueEngine and TTS were never used.
+        # Ensure DialogueEngine step was never called.
         mock_engine_instance.initialize.assert_not_called()
         mock_engine_instance.step.assert_not_called()
-        mock_tts_instance.synthesize.assert_not_called()
 
 
 if __name__ == "__main__":

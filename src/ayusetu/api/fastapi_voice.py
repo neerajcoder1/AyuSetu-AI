@@ -35,11 +35,17 @@ app.add_middleware(
 voice_pipeline = VoicePipeline()
 
 # ---------- Pydantic response & request models ----------
+class HealthCheckResponse(BaseModel):
+    status: str
+    version: str
+    services: Dict[str, str]
+
 class SessionCreateRequest(BaseModel):
     preferred_language: Optional[str] = "hinglish"
 
 class SessionCreateResponse(BaseModel):
     session_id: str
+    encounter_id: Optional[str] = None
     preferred_language: Optional[str] = "hinglish"
 
 class LanguageUpdateRequest(BaseModel):
@@ -107,11 +113,30 @@ def _wav_bytes_from_numpy(audio: Any, sample_rate: int) -> bytes:
     return wav_bytes
 
 # ------------------- Endpoints -------------------
+@app.get("/health", response_model=HealthCheckResponse)
+def health_check():
+    """Lightweight application health/readiness endpoint for container probes."""
+    return HealthCheckResponse(
+        status="healthy",
+        version="1.0.0",
+        services={
+            "asr": "ready",
+            "tts": "ready",
+            "dialogue": "ready",
+        },
+    )
+
 @app.post("/sessions", response_model=SessionCreateResponse)
 def create_session(req: Optional[SessionCreateRequest] = None):
     preferred_lang = req.preferred_language if req and req.preferred_language else "hinglish"
     session_id = voice_pipeline.create_session(preferred_language=preferred_lang)
-    return SessionCreateResponse(session_id=session_id, preferred_language=preferred_lang)
+    session_obj = voice_pipeline.get_session(session_id)
+    encounter_id = getattr(session_obj, "encounter_id", session_id)
+    return SessionCreateResponse(
+        session_id=session_id,
+        encounter_id=encounter_id,
+        preferred_language=preferred_lang
+    )
 
 @app.patch("/sessions/{session_id}/language")
 def update_language(session_id: str, req: LanguageUpdateRequest):
@@ -133,14 +158,20 @@ def turn(
     except KeyError:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    # Save uploaded file to a temporary path
+    # Read audio content into memory early to validate file size
     try:
-        suffix = Path(audio.filename).suffix or ".bin"
-        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_input:
-            tmp_input_path = Path(tmp_input.name)
-            tmp_input.write(audio.file.read())
+        content = audio.file.read()
     finally:
         audio.file.close()
+
+    if not content or len(content) == 0:
+        raise HTTPException(status_code=400, detail="Empty audio file uploaded")
+
+    # Save uploaded file to a temporary path
+    suffix = Path(audio.filename).suffix or ".bin"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_input:
+        tmp_input_path = Path(tmp_input.name)
+        tmp_input.write(content)
 
     # Convert to the required WAV format
     try:
@@ -282,7 +313,37 @@ def sign_off_summary_endpoint(session_id: str, req: SignOffRequest):
     except physician_review.AlreadySignedError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    # Optionally persist final signed clinical summary to Hindsight long-term memory
+    try:
+        engine = getattr(session, "engine", None)
+        hindsight_mgr = getattr(engine, "hindsight_manager", None)
+        patient_id = getattr(session.state, "patient_id", None)
+        if hindsight_mgr and hindsight_mgr.config.enabled and patient_id:
+            narrative_text = " ".join([clause.text for clause in updated.hpi_narrative]) if updated.hpi_narrative else ""
+            summary_parts = []
+            if updated.chief_complaint:
+                summary_parts.append(f"Chief Complaint: {updated.chief_complaint}")
+            if narrative_text:
+                summary_parts.append(f"HPI: {narrative_text}")
+            if updated.structured_history:
+                hist_items = [f"{k}: {v.display_value}" for k, v in updated.structured_history.items() if v.value]
+                if hist_items:
+                    summary_parts.append(f"History: {', '.join(hist_items)}")
+
+            summary_text = " | ".join(summary_parts) if summary_parts else f"Encounter summary signed by {updated.signed_by}"
+            hindsight_mgr.store_encounter_summary(
+                patient_id=patient_id,
+                session_id=session_id,
+                summary_text=summary_text,
+            )
+    except Exception as exc:
+        import logging
+        logging.getLogger("ayusetu.api.fastapi_voice").warning(
+            "Optional Hindsight summary persistence skipped on error: %s", exc
+        )
+
     return updated
+
 
 @app.put("/sessions/{session_id}/summary/edit")
 def edit_summary_endpoint(session_id: str, req: EditRequest):

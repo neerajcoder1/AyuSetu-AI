@@ -1,5 +1,5 @@
 import React from 'react';
-import { CheckCircle2, Circle, AlertCircle, Sparkles } from 'lucide-react';
+import { CheckCircle2, Circle, Sparkles } from 'lucide-react';
 
 const REQUIRED_SLOTS = [
   { key: 'chief_complaint', label: 'Chief Complaint', category: 'Primary' },
@@ -16,7 +16,6 @@ const REQUIRED_SLOTS = [
 
 export default function SlotChecklist({ dialogueState, isCompact = false }) {
   const collectedInfo = dialogueState?.collected_info || {};
-  const missingSlots = dialogueState?.missing_slots || [];
 
   const totalSlots = REQUIRED_SLOTS.length;
   const collectedCount = REQUIRED_SLOTS.filter(
@@ -26,23 +25,28 @@ export default function SlotChecklist({ dialogueState, isCompact = false }) {
   const percentage = Math.round((collectedCount / totalSlots) * 100);
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sm:p-5">
-      <div className="flex items-center justify-between mb-3">
+    <div className="bg-white rounded-2xl border border-slate-200/90 shadow-card p-4 sm:p-5 space-y-4">
+      <div className="flex items-center justify-between">
         <div className="flex items-center space-x-2">
-          <Sparkles className="w-4 h-4 text-medical-600" />
-          <h3 className="font-semibold text-slate-900 text-sm sm:text-base">
-            Clinical Memory Slots
-          </h3>
+          <div className="p-2 bg-teal-50 text-teal-700 rounded-xl">
+            <Sparkles className="w-4 h-4" />
+          </div>
+          <div>
+            <h3 className="font-bold text-slate-900 text-sm sm:text-base">
+              Clinical Memory Slots
+            </h3>
+            <p className="text-xs text-slate-500">Session slot elicitation progress</p>
+          </div>
         </div>
-        <span className="text-xs font-bold text-slate-600 bg-slate-100 px-2.5 py-1 rounded-full border border-slate-200">
-          {collectedCount} / {totalSlots} Collected
+        <span className="text-xs font-bold text-teal-900 bg-teal-50 px-2.5 py-1 rounded-full border border-teal-200">
+          {collectedCount} / {totalSlots} Elicited
         </span>
       </div>
 
       {/* Progress Bar */}
-      <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden mb-4">
+      <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
         <div
-          className="bg-gradient-to-r from-medical-500 to-teal-500 h-full transition-all duration-300 rounded-full"
+          className="bg-gradient-to-r from-medical-600 to-teal-500 h-full transition-all duration-300 rounded-full"
           style={{ width: `${percentage}%` }}
         />
       </div>
@@ -58,22 +62,22 @@ export default function SlotChecklist({ dialogueState, isCompact = false }) {
               key={slot.key}
               className={`flex items-start justify-between p-2.5 rounded-xl text-xs transition-all border ${
                 isCollected
-                  ? 'bg-emerald-50/70 border-emerald-200 text-emerald-900'
-                  : 'bg-slate-50 border-slate-200 text-slate-500'
+                  ? 'bg-teal-50/50 border-teal-200 text-teal-950 shadow-sm'
+                  : 'bg-slate-50/60 border-slate-200/80 text-slate-500'
               }`}
             >
               <div className="flex items-start space-x-2 min-w-0 pr-2">
                 {isCollected ? (
-                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                  <CheckCircle2 className="w-4 h-4 text-teal-600 shrink-0 mt-0.5" />
                 ) : (
                   <Circle className="w-4 h-4 text-slate-300 shrink-0 mt-0.5" />
                 )}
                 <div className="min-w-0">
-                  <span className={`font-semibold block ${isCollected ? 'text-emerald-950' : 'text-slate-700'}`}>
+                  <span className={`font-bold block ${isCollected ? 'text-slate-900' : 'text-slate-700'}`}>
                     {slot.label}
                   </span>
                   {isCollected ? (
-                    <span className="font-medium text-emerald-700 block truncate max-w-[200px]">
+                    <span className="font-medium text-teal-800 block truncate max-w-[180px]">
                       {String(value)}
                     </span>
                   ) : (
@@ -83,8 +87,8 @@ export default function SlotChecklist({ dialogueState, isCompact = false }) {
               </div>
 
               <span
-                className={`text-[10px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wider shrink-0 ${
-                  isCollected ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'
+                className={`text-[9px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wider shrink-0 ${
+                  isCollected ? 'bg-teal-100 text-teal-900 font-bold' : 'bg-slate-200 text-slate-600'
                 }`}
               >
                 {slot.category}

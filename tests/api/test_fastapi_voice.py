@@ -176,3 +176,19 @@ def test_get_timeline_not_found():
     response = client.get("/sessions/nonexistent-session/timeline")
     assert response.status_code == 404
 
+def test_health_check():
+    response = client.get("/health")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "healthy"
+    assert "services" in data
+    assert data["services"]["asr"] == "ready"
+
+def test_empty_audio_upload():
+    # 0-byte audio upload should return 400 Bad Request
+    files = {"audio": ("empty.wav", b"", "audio/wav")}
+    response = client.post("/sessions/dummy-session-id/turn", files=files)
+    assert response.status_code == 400
+    assert "Empty audio file" in response.json()["detail"]
+
+

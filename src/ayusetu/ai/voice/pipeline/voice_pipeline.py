@@ -14,7 +14,7 @@ def transcribe(audio_path: Path | str):
     return transcriber.transcribe(audio_path)
 
 from ayusetu.ai.conversation.engine import DialogueEngine, DialogueState
-from ayusetu.ai.voice.tts.chatterbox import ChatterboxTTS
+from ayusetu.ai.voice.tts import get_tts_provider, ChatterboxTTS
 from ayusetu.ai.clinical.red_flags.engine import RedFlagEngine
 from ayusetu.ai.clinical.red_flags.contracts import RedFlagEvent
 from ayusetu.ai.clinical.document_ai.contracts import ExtractedEntity
@@ -49,6 +49,13 @@ class ConversationSession:
     document_entities: List[ExtractedEntity] = field(default_factory=list)
     red_flag_events: List[RedFlagEvent] = field(default_factory=list)
     summary: Optional[ClinicalSummary] = None
+    encounter_id: Optional[str] = None
+    patient_id: Optional[str] = None
+
+    def __post_init__(self):
+        if not self.encounter_id:
+            import uuid
+            self.encounter_id = f"enc-{self.session_id[:12]}"
 
 
 class SessionManager:
@@ -94,24 +101,29 @@ class SessionManager:
         self._sessions[session_id] = session
         return session
 
-    def get_session(self, session_id: str) -> ConversationSession:
-        """Retrieve a session; raise ``KeyError`` if not found."""
-        try:
-            return self._sessions[session_id]
-        except KeyError as exc:
-            raise KeyError(f"Session ID {session_id!r} does not exist") from exc
+    def get_session(self, identifier: str) -> ConversationSession:
+        """Retrieve a session by session_id or encounter_id; raise ``KeyError`` if not found."""
+        if identifier in self._sessions:
+            return self._sessions[identifier]
+        # Check bi-directional encounter_id mapping
+        for session in self._sessions.values():
+            if session.encounter_id == identifier:
+                return session
+        raise KeyError(f"Session or Encounter ID {identifier!r} does not exist")
 
-    def end_session(self, session_id: str) -> None:
-        """Discard a session and its state.
-
-        Raises
-        ------
-        KeyError
-            If the session ID is unknown.
-        """
-        if session_id not in self._sessions:
-            raise KeyError(f"Session ID {session_id!r} does not exist")
-        del self._sessions[session_id]
+    def end_session(self, identifier: str) -> None:
+        """Discard a session by session_id or encounter_id."""
+        target_session = None
+        if identifier in self._sessions:
+            target_session = self._sessions[identifier]
+        else:
+            for s in self._sessions.values():
+                if s.encounter_id == identifier:
+                    target_session = s
+                    break
+        if not target_session:
+            raise KeyError(f"Session or Encounter ID {identifier!r} does not exist")
+        del self._sessions[target_session.session_id]
 
     def clear_all(self) -> None:
         """Remove all sessions – useful for tests."""
@@ -135,7 +147,7 @@ class VoicePipeline:
     def __init__(self, session_manager: Optional[SessionManager] = None):
         # Initialise reusable components once.
         self._dialogue_engine = DialogueEngine()
-        self._tts_provider = ChatterboxTTS()
+        self._tts_provider = get_tts_provider()
         self._red_flag_engine = RedFlagEngine()
         # Use provided SessionManager or instantiate a default one.
         self._session_manager = session_manager or SessionManager(self._dialogue_engine)
@@ -207,9 +219,23 @@ class VoicePipeline:
         }
 
         if low_conf:
+            target_lang = getattr(state, "preferred_language", None) or asr_output.language
+            if not target_lang or target_lang == "unknown":
+                target_lang = "hinglish"
+            reprompt_text = "Understood, please tell me more about your symptoms." if target_lang == "en" else "Samajh gaya, kripya aage batayein."
             logger.info(
-                "ASR confidence %.4f below threshold – skipping dialogue engine.",
+                "ASR confidence %.4f below threshold – synthesizing re-prompt response audio for language='%s'.",
                 asr_output.confidence,
+                target_lang,
+            )
+            tts_result = self._tts_provider.synthesize(text=reprompt_text, language=target_lang)
+            result.update(
+                {
+                    "response_text": reprompt_text,
+                    "response_audio": tts_result.audio,
+                    "response_sample_rate": tts_result.sample_rate,
+                    "response_duration": tts_result.duration,
+                }
             )
             return result
 

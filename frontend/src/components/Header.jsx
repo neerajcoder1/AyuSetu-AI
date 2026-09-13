@@ -1,69 +1,134 @@
-import React from 'react';
-import { Activity, Stethoscope, User, RefreshCw, AlertCircle, CheckCircle2, Globe } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Activity, Stethoscope, User, RefreshCw, Globe, LogOut, Lock } from 'lucide-react';
+import { api } from '../services/api';
 
 export default function Header({
   activeTab,
   setActiveTab,
   sessionId,
   onNewSession,
-  isConnected,
   isCreatingSession,
   preferredLanguage = 'hinglish',
   onLanguageChange,
+  userAuth,
+  onLogout,
 }) {
+  const [apiHealth, setApiHealth] = useState('checking'); // 'checking' | 'ready' | 'error'
+
+  useEffect(() => {
+    let isMounted = true;
+    const checkBackendHealth = async () => {
+      try {
+        await api.checkHealth();
+        if (isMounted) setApiHealth('ready');
+      } catch (err) {
+        if (isMounted) setApiHealth('error');
+      }
+    };
+
+    checkBackendHealth();
+    const interval = setInterval(checkBackendHealth, 15000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, []);
+
+  const isPatientRole = userAuth?.role === 'patient';
+  const isPhysicianRole = userAuth?.role === 'physician';
+
   return (
-    <header className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
+    <header className="bg-white/95 backdrop-blur-md border-b border-slate-200/80 sticky top-0 z-30 shadow-sm">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
-          {/* Brand Logo & Name */}
+          {/* Official AyuSetu AI Brand Identity */}
           <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-medical-600 to-sky-400 flex items-center justify-center text-white shadow-md shadow-sky-500/20">
-              <Activity className="w-6 h-6 animate-pulse" />
-            </div>
-            <div>
-              <div className="flex items-center space-x-2">
-                <span className="font-bold text-xl text-slate-900 tracking-tight">AyuSetu AI</span>
-                <span className="bg-sky-100 text-sky-700 text-xs font-semibold px-2 py-0.5 rounded-full">
-                  v2.0 Clinical
-                </span>
-              </div>
-              <p className="text-xs text-slate-500 font-medium">Session-Scoped Intake & Cockpit</p>
-            </div>
+            <img
+              src="/branding/ayusetu-logo-primary.png"
+              alt="AyuSetu AI"
+              className="h-10 sm:h-11 w-auto object-contain"
+            />
+            <span className="hidden lg:inline-block bg-teal-50 text-teal-800 border border-teal-200/80 text-[10px] font-extrabold px-2.5 py-0.5 rounded-full">
+              Clinical Case-Taking Platform
+            </span>
           </div>
 
-          {/* Navigation View Switcher */}
-          <div className="flex items-center space-x-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
+          {/* Navigation View Switcher (Role Scoped) */}
+          <div className="flex items-center space-x-1 bg-slate-100/90 p-1 rounded-xl border border-slate-200/90 shadow-inner">
             <button
               onClick={() => setActiveTab('patient')}
-              className={`flex items-center space-x-2 px-3 py-1.5 rounded-lg font-medium text-xs sm:text-sm transition-all duration-150 ${
+              className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-lg font-semibold text-xs sm:text-sm transition-all duration-150 ${
                 activeTab === 'patient'
-                  ? 'bg-white text-medical-700 shadow-sm font-semibold'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
+                  ? 'bg-white text-sky-800 shadow-sm font-bold border border-slate-200/60'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
               }`}
             >
-              <User className="w-4 h-4" />
-              <span>Patient Voice Intake</span>
+              <User className="w-4 h-4 text-sky-600" />
+              <span>Patient Consultation</span>
             </button>
 
-            <button
-              onClick={() => setActiveTab('doctor')}
-              className={`flex items-center space-x-2 px-3 py-1.5 rounded-lg font-medium text-xs sm:text-sm transition-all duration-150 ${
-                activeTab === 'doctor'
-                  ? 'bg-white text-medical-700 shadow-sm font-semibold'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/50'
-              }`}
-            >
-              <Stethoscope className="w-4 h-4" />
-              <span>Doctor Cockpit</span>
-            </button>
+            {/* Physician View Switcher button rendered ONLY for Physician Role */}
+            {!isPatientRole && (
+              <button
+                onClick={() => setActiveTab('doctor')}
+                className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-lg font-semibold text-xs sm:text-sm transition-all duration-150 ${
+                  activeTab === 'doctor'
+                    ? 'bg-white text-sky-800 shadow-sm font-bold border border-slate-200/60'
+                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                }`}
+              >
+                <Stethoscope className="w-4 h-4 text-sky-600" />
+                <span>Physician Cockpit</span>
+              </button>
+            )}
           </div>
 
-          {/* Session Info & Preferred Language & Connectivity */}
+          {/* Session Info, Role Profile & Logout */}
           <div className="flex items-center space-x-3">
-            {/* Preferred Language Selector Pill */}
-            <div className="flex items-center space-x-1.5 bg-slate-100 border border-slate-200 rounded-lg px-2.5 py-1 text-xs">
-              <Globe className="w-3.5 h-3.5 text-medical-600 shrink-0" />
-              <span className="text-[10px] text-slate-500 font-semibold uppercase tracking-wider hidden sm:inline">AI Lang:</span>
+            {/* Real API Health Indicator */}
+            <div className="hidden lg:flex items-center space-x-1.5 px-2.5 py-1 rounded-xl bg-slate-50 border border-slate-200 text-xs font-semibold">
+              {apiHealth === 'ready' && (
+                <>
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <span className="text-slate-700">API Ready</span>
+                </>
+              )}
+              {apiHealth === 'error' && (
+                <>
+                  <span className="w-2 h-2 rounded-full bg-rose-500" />
+                  <span className="text-slate-700">API Offline</span>
+                </>
+              )}
+              {apiHealth === 'checking' && (
+                <>
+                  <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                  <span className="text-slate-700">Checking...</span>
+                </>
+              )}
+            </div>
+
+            {/* User Profile Pill */}
+            {userAuth && (
+              <div className="flex items-center space-x-2 bg-slate-100 border border-slate-200 rounded-xl px-2.5 py-1 text-xs">
+                {isPhysicianRole ? (
+                  <Stethoscope className="w-3.5 h-3.5 text-teal-600" />
+                ) : (
+                  <User className="w-3.5 h-3.5 text-sky-600" />
+                )}
+                <div className="flex flex-col">
+                  <span className="font-bold text-slate-800 text-[11px] leading-none">
+                    {userAuth.displayName || (isPhysicianRole ? 'Demo Physician' : 'Demo Patient')}
+                  </span>
+                  <span className="text-[9px] text-slate-500 font-semibold uppercase tracking-wider">
+                    Prototype Demo
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Preferred Language Selector (Global Application Setting) */}
+            <div className="flex items-center space-x-1.5 bg-slate-50 border border-slate-200/90 rounded-xl px-2.5 py-1 text-xs">
+              <Globe className="w-3.5 h-3.5 text-sky-600 shrink-0" />
               <select
                 value={preferredLanguage}
                 onChange={(e) => onLanguageChange && onLanguageChange(e.target.value)}
@@ -75,27 +140,12 @@ export default function Header({
               </select>
             </div>
 
-            {/* Status indicator */}
-            <div className="hidden md:flex items-center space-x-1.5 px-2 py-1 rounded-md bg-slate-50 border border-slate-200 text-xs font-medium">
-              {isConnected ? (
-                <>
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                  <span className="text-slate-600">FastAPI Ready</span>
-                </>
-              ) : (
-                <>
-                  <AlertCircle className="w-3.5 h-3.5 text-amber-500" />
-                  <span className="text-slate-600">Connecting...</span>
-                </>
-              )}
-            </div>
-
-            {/* Session ID Pill */}
-            {sessionId ? (
-              <div className="flex items-center space-x-2 bg-sky-50 border border-sky-200 rounded-lg px-2.5 py-1">
+            {/* Session ID Badge */}
+            {sessionId && (
+              <div className="hidden md:flex items-center space-x-2 bg-teal-50/70 border border-teal-200/80 rounded-xl px-2.5 py-1">
                 <div className="flex flex-col">
-                  <span className="text-[10px] text-sky-600 uppercase tracking-wider font-semibold">Session ID</span>
-                  <span className="font-mono text-xs text-sky-900 font-bold max-w-[100px] sm:max-w-[140px] truncate">
+                  <span className="text-[9px] text-teal-700 uppercase tracking-wider font-bold">Session</span>
+                  <span className="font-mono text-xs text-teal-950 font-bold max-w-[80px] truncate">
                     {sessionId}
                   </span>
                 </div>
@@ -103,18 +153,22 @@ export default function Header({
                   onClick={() => onNewSession && onNewSession(preferredLanguage)}
                   disabled={isCreatingSession}
                   title="Create New Session"
-                  className="p-1 rounded-md text-sky-700 hover:bg-sky-100 transition-colors disabled:opacity-50"
+                  className="p-1 rounded-lg text-teal-700 hover:bg-teal-100 transition-colors disabled:opacity-50"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${isCreatingSession ? 'animate-spin' : ''}`} />
                 </button>
               </div>
-            ) : (
+            )}
+
+            {/* Logout Button */}
+            {userAuth && (
               <button
-                onClick={() => onNewSession && onNewSession(preferredLanguage)}
-                disabled={isCreatingSession}
-                className="bg-medical-600 hover:bg-medical-700 text-white font-medium text-xs px-3 py-1.5 rounded-lg shadow-sm transition-all"
+                onClick={onLogout}
+                title="Logout / Switch Role"
+                className="flex items-center space-x-1 bg-slate-100 hover:bg-rose-50 text-slate-700 hover:text-rose-700 border border-slate-200 hover:border-rose-200 font-bold text-xs px-2.5 py-1.5 rounded-xl transition-all"
               >
-                {isCreatingSession ? 'Creating...' : 'Start Session'}
+                <LogOut className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Logout</span>
               </button>
             )}
           </div>

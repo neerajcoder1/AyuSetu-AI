@@ -1,5 +1,5 @@
 import React from 'react';
-import { Mic, Square, Send, RefreshCw, Volume2, AlertTriangle } from 'lucide-react';
+import { Mic, Square, Send, RefreshCw, Volume2, AlertTriangle, Radio } from 'lucide-react';
 import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
 
 export default function AudioRecorder({
@@ -33,10 +33,29 @@ export default function AudioRecorder({
   };
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 sm:p-6 text-center">
+    <div className="bg-white rounded-2xl border border-slate-200/90 shadow-card p-5 sm:p-6 text-center space-y-4">
+      {/* Card Header */}
+      <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+        <div className="flex items-center space-x-2">
+          <div className="p-2 bg-medical-50 text-medical-700 rounded-xl">
+            <Radio className="w-4 h-4" />
+          </div>
+          <div className="text-left">
+            <h3 className="font-bold text-slate-900 text-sm sm:text-base">Voice Consultation Mic</h3>
+            <p className="text-xs text-slate-500">Speak your symptoms naturally in Hindi, Hinglish, or English</p>
+          </div>
+        </div>
+        {isRecording && (
+          <span className="flex items-center space-x-1.5 px-2.5 py-1 bg-rose-50 text-rose-700 border border-rose-200 rounded-full text-xs font-bold font-mono">
+            <span className="w-2 h-2 rounded-full bg-rose-600 animate-pulse" />
+            <span>RECORDING ({formatTime(recordingTime)})</span>
+          </span>
+        )}
+      </div>
+
       {/* Error Alert */}
       {error && (
-        <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl text-left flex items-center space-x-2">
+        <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl text-left flex items-center space-x-2">
           <AlertTriangle className="w-4 h-4 text-red-500 shrink-0" />
           <span>{error}</span>
         </div>
@@ -44,7 +63,7 @@ export default function AudioRecorder({
 
       {/* Low Confidence Warning from last turn */}
       {lowConfidenceWarning && (
-        <div className="mb-4 p-3 bg-amber-50 border border-amber-200 text-amber-800 text-xs rounded-xl text-left flex items-center space-x-2">
+        <div className="p-3 bg-amber-50 border border-amber-200 text-amber-900 text-xs rounded-xl text-left flex items-center space-x-2">
           <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
           <span>
             <strong>Low Speech Recognition Confidence</strong> — AI may have misheard your previous response. Please speak clearly into the microphone.
@@ -52,13 +71,13 @@ export default function AudioRecorder({
         </div>
       )}
 
-      <div className="flex flex-col items-center justify-center space-y-4">
+      <div className="flex flex-col items-center justify-center space-y-4 py-2">
         {/* Main Microphone Button */}
         <div className="relative">
           {/* Animated pulse rings during recording */}
           {isRecording && (
             <div
-              className="absolute -inset-3 rounded-full bg-red-400 opacity-75 animate-ping"
+              className="absolute -inset-3 rounded-full bg-rose-400 opacity-75 animate-ping"
               style={{ animationDuration: '1.5s' }}
             />
           )}
@@ -66,42 +85,36 @@ export default function AudioRecorder({
           <button
             onClick={isRecording ? stopRecording : startRecording}
             disabled={isSendingTurn}
-            className={`relative z-10 w-24 h-24 rounded-full flex flex-col items-center justify-center text-white shadow-xl transition-all duration-300 transform active:scale-95 ${
+            className={`relative z-10 w-24 h-24 rounded-full flex flex-col items-center justify-center text-white shadow-lg transition-all duration-200 transform active:scale-95 ${
               isRecording
-                ? 'bg-gradient-to-tr from-red-600 to-rose-500 hover:from-red-700 hover:to-rose-600 ring-4 ring-red-200'
-                : 'bg-gradient-to-tr from-medical-600 to-sky-500 hover:from-medical-700 hover:to-sky-600 hover:shadow-sky-500/25 ring-4 ring-sky-100'
+                ? 'bg-rose-600 hover:bg-rose-700 ring-4 ring-rose-200'
+                : 'bg-medical-700 hover:bg-medical-800 ring-4 ring-teal-100 hover:shadow-teal-700/20'
             } disabled:opacity-50`}
           >
             {isRecording ? (
               <>
-                <Square className="w-8 h-8 fill-current mb-1" />
+                <Square className="w-7 h-7 fill-current mb-1" />
                 <span className="text-[10px] font-bold uppercase tracking-wider">Stop</span>
               </>
             ) : (
               <>
-                <Mic className="w-9 h-9 mb-1" />
-                <span className="text-[10px] font-bold uppercase tracking-wider">Speak</span>
+                <Mic className="w-8 h-8 mb-1" />
+                <span className="text-[10px] font-bold uppercase tracking-wider">Tap to Speak</span>
               </>
             )}
           </button>
         </div>
 
-        {/* Recording Status & Timer */}
+        {/* Audio Volume Bar Visualizer during recording */}
         {isRecording && (
           <div className="flex flex-col items-center space-y-2">
-            <div className="flex items-center space-x-2 bg-red-50 text-red-700 px-3 py-1 rounded-full border border-red-200 font-mono text-sm font-bold">
-              <span className="w-2.5 h-2.5 rounded-full bg-red-600 animate-pulse" />
-              <span>{formatTime(recordingTime)}</span>
-            </div>
-
-            {/* Audio Volume Bar Visualizer */}
-            <div className="flex items-center space-x-1 h-6 px-4">
+            <div className="flex items-center space-x-1.5 h-6 px-4">
               {[...Array(12)].map((_, i) => {
                 const height = Math.max(15, Math.min(100, volumeLevel * (1 + (i % 3) * 0.2)));
                 return (
                   <div
                     key={i}
-                    className="w-1 bg-red-400 rounded-full transition-all duration-75"
+                    className="w-1.5 bg-rose-500 rounded-full transition-all duration-75"
                     style={{ height: `${height}%` }}
                   />
                 );
@@ -112,15 +125,15 @@ export default function AudioRecorder({
 
         {/* Audio Captured Preview */}
         {!isRecording && audioUrl && (
-          <div className="w-full max-w-md bg-slate-50 border border-slate-200 rounded-xl p-3 flex flex-col space-y-3">
+          <div className="w-full max-w-md bg-slate-50 border border-slate-200 rounded-xl p-3.5 flex flex-col space-y-3">
             <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2 text-xs font-semibold text-slate-700">
-                <Volume2 className="w-4 h-4 text-medical-600" />
+              <div className="flex items-center space-x-2 text-xs font-bold text-slate-700">
+                <Volume2 className="w-4 h-4 text-medical-700" />
                 <span>Recorded Turn Preview ({formatTime(recordingTime)})</span>
               </div>
               <button
                 onClick={clearAudio}
-                className="text-xs text-slate-500 hover:text-slate-800 underline"
+                className="text-xs text-slate-500 hover:text-slate-800 font-semibold underline"
               >
                 Re-record
               </button>
@@ -139,7 +152,7 @@ export default function AudioRecorder({
               <button
                 onClick={handleSend}
                 disabled={isSendingTurn}
-                className="flex items-center space-x-1.5 px-4 py-1.5 bg-medical-600 hover:bg-medical-700 text-white font-semibold text-xs rounded-lg shadow-sm transition-all disabled:opacity-50"
+                className="flex items-center space-x-1.5 px-4 py-1.5 bg-medical-700 hover:bg-medical-800 text-white font-bold text-xs rounded-xl shadow-sm transition-all disabled:opacity-50"
               >
                 {isSendingTurn ? (
                   <>
@@ -149,7 +162,7 @@ export default function AudioRecorder({
                 ) : (
                   <>
                     <Send className="w-3.5 h-3.5" />
-                    <span>Send to AI</span>
+                    <span>Send to AI Consultation</span>
                   </>
                 )}
               </button>
@@ -158,8 +171,8 @@ export default function AudioRecorder({
         )}
 
         {!isRecording && !audioUrl && (
-          <p className="text-xs text-slate-500 max-w-xs">
-            Tap the microphone button to start speaking in Hindi, Hinglish, or English.
+          <p className="text-xs text-slate-500 max-w-xs font-medium">
+            Tap the microphone button to start speaking. AyuSetu AI will listen and ask follow-up questions.
           </p>
         )}
       </div>

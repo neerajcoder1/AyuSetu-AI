@@ -1,3 +1,4 @@
+from typing import Optional
 from ayusetu.ai.conversation.llm_provider import LLMProvider
 from contracts.dialogue import PlannerAction
 
@@ -9,7 +10,7 @@ class WordingLLM:
     def __init__(self, provider: LLMProvider):
         self.provider = provider
         
-    def generate_wording(self, action: PlannerAction, language: str) -> str:
+    def generate_wording(self, action: PlannerAction, language: str, historical_context: Optional[str] = None) -> str:
         if action.is_complete:
             intent = "Thank the patient and politely conclude the interview."
             slot_name = "N/A"
@@ -29,13 +30,17 @@ class WordingLLM:
             "2. DO NOT provide medical advice or diagnosis.\n"
             "3. DO NOT output JSON or extra conversational filler, just the exact question.\n"
             "4. Match the tone of a professional, caring doctor.\n"
+            "5. Historical context is for background context only; do NOT overwrite or invent current clinical findings.\n"
         )
         
         user_prompt = (
             f"Slot: {slot_name}\n"
             f"Question Intent: {intent}\n"
             f"Requested Language: {language}\n"
-            "Output the question wording directly:"
         )
+        if historical_context:
+            user_prompt += f"Patient History Context (Background Reference Only):\n{historical_context}\n"
+        user_prompt += "Output the question wording directly:"
         
         return self.provider.generate(sys_prompt, user_prompt)
+

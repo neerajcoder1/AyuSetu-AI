@@ -7,6 +7,7 @@ from ayusetu.ai.conversation.extractor import ClinicalExtractor, DeterministicRu
 from ayusetu.ai.conversation.wording import WordingLLM
 from ayusetu.ai.conversation.llm_provider import OpenAICompatibleProvider
 from ayusetu.ai.clinical.memory import ClinicalMemory
+from ayusetu.ai.clinical.hindsight import HindsightMemoryManager
 
 
 class DialogueEngine:
@@ -27,6 +28,12 @@ class DialogueEngine:
     passes a session-specific ``ClinicalMemory`` instance via the constructor.
     By default (``memory=None``) a new ``ClinicalMemory`` is instantiated,
     guaranteeing isolation.
+
+    Optional Long-Term Hindsight Memory
+    -----------------------------------
+    If ``hindsight_manager`` is supplied, historical patient encounters are
+    queried in background and passed to ``wording_llm`` for context.
+    ``ClinicalMemory`` remains completely untouched by Hindsight context.
     """
 
     def __init__(self,
@@ -34,7 +41,8 @@ class DialogueEngine:
                  llm_provider=None,
                  asr_confidence_threshold: float = 0.6,
                  extraction_confidence_threshold: float = 0.7,
-                 memory: Optional[ClinicalMemory] = None):
+                 memory: Optional[ClinicalMemory] = None,
+                 hindsight_manager: Optional[HindsightMemoryManager] = None):
 
         self.extractor = extractor or DeterministicRuleExtractor()
 
@@ -49,12 +57,13 @@ class DialogueEngine:
         # Each engine instance gets its own ClinicalMemory.
         # Passing an explicit instance is supported for testing.
         self.memory: ClinicalMemory = memory if memory is not None else ClinicalMemory()
+        self.hindsight_manager = hindsight_manager
 
     def initialize(self) -> DialogueState:
         """Returns a fresh dialogue state."""
         return self.planner.initialize_state()
 
-    def step(self, asr_output: ASROutput, state: DialogueState) -> str:
+    def step(self, asr_output: ASROutput, state: DialogueState, patient_id: Optional[str] = None) -> str:
         """
         Process a single turn of the dialogue.
         Updates state in place and returns the worded question from the AI.
@@ -84,13 +93,26 @@ class DialogueEngine:
         # 2. State Machine Planner determines intent
         action = self.planner.plan_next_action(asr_output, state, extraction_result)
 
-        # 3. Wording Layer translates intent to natural language
+        # 3. Optional Hindsight memory retrieval (background context for wording)
+        historical_context = None
+        eff_patient_id = patient_id or getattr(state, "patient_id", None)
+        if self.hindsight_manager and eff_patient_id:
+            historical_context = self.hindsight_manager.retrieve_historical_context(
+                patient_id=eff_patient_id,
+                current_query=asr_output.text
+            )
+
+        # 4. Wording Layer translates intent to natural language
         target_lang = getattr(state, "preferred_language", None) or asr_output.language
         if not target_lang or target_lang == "unknown":
             target_lang = "hinglish"
-        response_text = self.wording_llm.generate_wording(action, target_lang)
+        response_text = self.wording_llm.generate_wording(
+            action=action,
+            language=target_lang,
+            historical_context=historical_context
+        )
 
-        # 4. Append AI response to history
+        # 5. Append AI response to history
         state.history.append(DialogueTurn(
             speaker="system",
             text=response_text,
@@ -98,3 +120,4 @@ class DialogueEngine:
         ))
 
         return response_text
+
