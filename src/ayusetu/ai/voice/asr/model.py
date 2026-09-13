@@ -230,11 +230,26 @@ class TransformersBackend(BaseASRBackend):
             if torch_dtype is not None:
                 load_kwargs["torch_dtype"] = torch_dtype
 
+            # Load base Whisper model
             self._model = WhisperForConditionalGeneration.from_pretrained(
                 self._config.model_id,
                 **load_kwargs,
             )
+            # Move model to device
             self._model = self._model.to(self._config.device)
+            # Optional PEFT LoRA adapter loading
+            from ayusetu.ai.voice.asr.config import get_adapter_path
+            adapter_path = get_adapter_path()
+            if adapter_path is not None:
+                try:
+                    from peft import PeftModel
+                    self._model = PeftModel.from_pretrained(self._model, str(adapter_path))
+                    logger.info("Loaded PEFT adapter from %s", adapter_path)
+                except Exception as exc:
+                    raise ModelLoadError(
+                        f"Failed to load PEFT adapter from '{adapter_path}': {exc}"
+                    ) from exc
+            # Set model to eval mode
             self._model.eval()
             logger.debug(
                 "WhisperForConditionalGeneration loaded and moved to '%s'.",
@@ -288,15 +303,18 @@ class TransformersBackend(BaseASRBackend):
                     "Forcing language token: '%s'", self._config.force_language
                 )
             else:
-                # CRITICAL for zero-stt-hinglish:
-                # Removing forced_decoder_ids allows the model to generate its
-                # own language token and produce mixed-script (Hinglish) output.
-                # Clearing suppress_tokens prevents suppressing non-task tokens.
-                gen_kwargs["forced_decoder_ids"] = None
+                # Explicitly force task="transcribe" while keeping language=None.
+                # This ensures the model transcribes the spoken speech (Hindi, Hinglish, English)
+                # verbatim without translating to English, while leaving language detection open.
+                forced_ids = self._processor.get_decoder_prompt_ids(
+                    language=None,
+                    task="transcribe",
+                )
+                gen_kwargs["forced_decoder_ids"] = forced_ids
                 gen_kwargs["suppress_tokens"] = []
                 logger.debug(
-                    "No language forced: forced_decoder_ids=None, "
-                    "suppress_tokens=[] (required for Hinglish output)."
+                    "Forced task='transcribe' with language=None: %s",
+                    forced_ids,
                 )
 
             # ── Step 3: Generate ─────────────────────────────────────────────
