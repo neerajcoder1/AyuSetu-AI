@@ -65,18 +65,53 @@ class DialoguePlanner:
                     current_state.collected_info[ext.slot] = ext.value
                     if ext.slot in current_state.missing_slots:
                         current_state.missing_slots.remove(ext.slot)
+        # ==== Clarification handling for chief complaint ====
+        # Determine if chief complaint is still missing
+        chief_missing = ClinicalSlot.CHIEF_COMPLAINT in current_state.missing_slots
+        # Check if we already have a confident extraction for chief complaint
+        chief_extracted = any(
+            ext.slot == ClinicalSlot.CHIEF_COMPLAINT and ext.confidence >= self.extraction_confidence_threshold
+            for ext in extraction_result.extractions
+        )
+        # Check if any other clinical slot was confidently extracted (evidence patient attempted a complaint)
+        other_confident = any(
+            ext.slot != ClinicalSlot.CHIEF_COMPLAINT and ext.confidence >= self.extraction_confidence_threshold
+            for ext in extraction_result.extractions
+        )
+        # Activate clarification mode if chief missing, no confident chief, but other info present
+        if chief_missing and not chief_extracted and other_confident:
+            current_state.chief_complaint_attempted = True
+            clarification_intent = "आपको किस तरह की तकलीफ़ या समस्या हो रही है? कृपया थोड़ा और बताइए।"
+            return PlannerAction(
+                next_slot=ClinicalSlot.CHIEF_COMPLAINT,
+                question_intent=clarification_intent,
+                is_complete=False,
+                needs_clarification=True,
+            )
+        # If we are already in clarification mode and still no chief extraction, keep asking clarification
+        if current_state.chief_complaint_attempted and chief_missing and not chief_extracted:
+            clarification_intent = "आपको किस तरह की तकलीफ़ या समस्या हो रही है? कृपया थोड़ा और बताइए।"
+            return PlannerAction(
+                next_slot=ClinicalSlot.CHIEF_COMPLAINT,
+                question_intent=clarification_intent,
+                is_complete=False,
+                needs_clarification=True,
+            )
+        # If a confident chief complaint was finally extracted, clear the flag
+        if chief_extracted:
+            current_state.chief_complaint_attempted = False
 
-        # 4. Determine next slot (Deterministic queue)
+        # ==== Deterministic queue ====
         if not current_state.missing_slots:
             current_state.is_complete = True
             return PlannerAction(is_complete=True)
 
         next_slot = current_state.missing_slots[0]
         intent = SLOT_INTENTS.get(next_slot, "Ask for this information.")
-        
+
         return PlannerAction(
-            next_slot=next_slot, 
+            next_slot=next_slot,
             question_intent=intent,
             is_complete=False,
-            needs_clarification=False
+            needs_clarification=False,
         )

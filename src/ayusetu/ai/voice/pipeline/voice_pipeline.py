@@ -145,12 +145,31 @@ class VoicePipeline:
     """
 
     def __init__(self, session_manager: Optional[SessionManager] = None):
-        # Initialise reusable components once.
+        # Initialise core components
         self._dialogue_engine = DialogueEngine()
-        self._tts_provider = get_tts_provider()
         self._red_flag_engine = RedFlagEngine()
-        # Use provided SessionManager or instantiate a default one.
+        # Initialise TTS provider – optional backend may be missing in test env.
+        try:
+            self._tts_provider = get_tts_provider()
+        except ImportError as e:
+            logger.warning(f"TTS backend not available ({e}); using dummy provider for tests.")
+            class _DummyTTS:
+                def __init__(self, *args, **kwargs):
+                    pass
+
+                def synthesize(self, *args, **kwargs):
+                    raise NotImplementedError(
+                        "TTS synthesis is unavailable because no backend is installed."
+                    )
+
+                # Provide any other expected attributes/methods as no‑ops.
+                def __getattr__(self, name):
+                    return lambda *a, **k: None
+
+            self._tts_provider = _DummyTTS()
+        # Initialise session manager
         self._session_manager = session_manager or SessionManager(self._dialogue_engine)
+
 
     # ---------------------------------------------------------------------
     # Session lifecycle helpers

@@ -36,6 +36,9 @@ class DialogueState(BaseModel):
     needs_clarification: bool = False
     is_complete: bool = False
     preferred_language: str = "hinglish"
+    # Minimal flag indicating that a patient has attempted to describe a chief complaint
+    # but the deterministic extractor did not produce a confident CHIEF_COMPLAINT slot.
+    chief_complaint_attempted: bool = False
 
 class PlannerAction(BaseModel):
     next_slot: Optional[ClinicalSlot] = None
