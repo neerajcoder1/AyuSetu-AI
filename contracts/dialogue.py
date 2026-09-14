@@ -39,6 +39,8 @@ class DialogueState(BaseModel):
     # Minimal flag indicating that a patient has attempted to describe a chief complaint
     # but the deterministic extractor did not produce a confident CHIEF_COMPLAINT slot.
     chief_complaint_attempted: bool = False
+    body_map_location: Optional[str] = None
+    slot_attempts: Dict[ClinicalSlot, int] = Field(default_factory=dict)
 
 class PlannerAction(BaseModel):
     next_slot: Optional[ClinicalSlot] = None

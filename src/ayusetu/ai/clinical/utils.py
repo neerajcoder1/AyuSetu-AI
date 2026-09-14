@@ -106,7 +106,7 @@ def parse_duration(text: str) -> Optional[Tuple[str, float]]:
 # Severity parsing
 # ---------------------------------------------------------------------------
 
-def parse_severity(text: str) -> Optional[Tuple[str, float]]:
+def parse_severity(text: str, target_slot: Optional[str] = None) -> Optional[Tuple[str, float]]:
     """
     Extract a severity description from *text*.
 
@@ -119,18 +119,30 @@ def parse_severity(text: str) -> Optional[Tuple[str, float]]:
 
     text_lower = text.lower()
 
+    # If explicitly asked for severity, any plain number like "five", "5", "around 7" can be parsed
+    if target_slot == "severity":
+        # Check for plain digit with optional "around" or "lagbhag"
+        m_num = re.search(r"\b(?:around\s+|about\s+|lagbhag\s+|लगभग\s+)?([1-9]|10)\b", text_lower)
+        if m_num:
+            return f"{m_num.group(1)}/10", 0.85
+
+        for word, val in _NUMBER_WORDS.items():
+            if re.search(r"\b" + re.escape(word) + r"\b", text_lower):
+                if 1 <= val <= 10:
+                    return f"{val}/10", 0.85
+
     severity_map = [
         # Very severe
         (re.compile(
-            r"\b(unbearable|intolerable|bahut zyada|bahut tez|बहुत तेज़?|असहनीय)\b",
+            r"\b(unbearable|intolerable|bahut zyada|bahut tez|बहुत तेज़?|असहनीय|बहुत ज्यादा)\b",
             re.I | re.U), "very severe", 0.88),
         # Severe
         (re.compile(
-            r"\b(severe|bad|badly|tez|तेज़?|zyada|ज़्यादा|बहुत दर्द)\b",
+            r"\b(severe|bad|badly|tez|तेज़?|zyada|ज़्यादा|बहुत दर्द|बहुत तेज दर्द)\b",
             re.I | re.U), "severe", 0.82),
         # Moderate
         (re.compile(
-            r"\b(moderate|medium|thoda|थोड़ा|kam zyada|ठीक[-\s]?ठाक)\b",
+            r"\b(moderate|medium|thoda|थोड़ा|kam zyada|ठीक[-\s]?ठाक|मध्यम)\b",
             re.I | re.U), "moderate", 0.78),
         # Mild
         (re.compile(

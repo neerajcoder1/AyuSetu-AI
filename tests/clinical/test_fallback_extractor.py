@@ -91,7 +91,7 @@ def test_chief_complaint_english(fallback_extractor):
     assert "2 day" in slots[ClinicalSlot.DURATION].lower()
 
 def test_chief_complaint_hindi(fallback_extractor):
-    res = fallback_extractor.extract("???? ??? ??? ???? ??")
+    res = fallback_extractor.extract("मुझे पेट दर्द है")
     slots = {e.slot: e.value for e in res.extractions}
     assert ClinicalSlot.CHIEF_COMPLAINT in slots
 
@@ -156,4 +156,4 @@ def test_empty_response_guard():
 
     assert response is not None
     assert response.strip() != ""
-    assert "Ask the patient" in response or "Could you please" in response
+    assert "आपको क्या समस्या हो रही है?" in response or "कृपया थोड़ा और बताइए।" in response

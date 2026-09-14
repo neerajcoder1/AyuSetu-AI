@@ -1,7 +1,7 @@
 from typing import Optional
 from contracts.asr_output import ASROutput
-from contracts.extraction import ExtractionResult
-from contracts.dialogue import DialogueState, DialogueTurn
+from contracts.extraction import ExtractionResult, ExtractedSlot
+from contracts.dialogue import DialogueState, DialogueTurn, ClinicalSlot
 from ayusetu.ai.conversation.planner import DialoguePlanner
 from ayusetu.ai.conversation.extractor import ClinicalExtractor, DeterministicRuleExtractor
 from ayusetu.ai.conversation.wording import WordingLLM
@@ -63,9 +63,39 @@ class DialogueEngine:
         self.memory: ClinicalMemory = memory if memory is not None else ClinicalMemory()
         self.hindsight_manager = hindsight_manager
 
-    def initialize(self) -> DialogueState:
+    def initialize(self, body_map_location: Optional[str] = None) -> DialogueState:
         """Returns a fresh dialogue state."""
-        return self.planner.initialize_state()
+        state = self.planner.initialize_state()
+        if body_map_location:
+            state.body_map_location = body_map_location
+        return state
+
+    def generate_opening(self, state: DialogueState) -> str:
+        """
+        Generate the first greeting, optionally using the body map context.
+        """
+        if state.body_map_location:
+            loc = state.body_map_location.lower()
+            if "head" in loc or "sir" in loc or "सिर" in loc:
+                response = "आपके सिर में तकलीफ़ है। कृपया बताइए, यह समस्या कब से है?"
+            elif "chest" in loc or "seene" in loc or "सीने" in loc:
+                response = "आपके सीने में तकलीफ़ है। कृपया बताइए, यह समस्या कब से है?"
+            elif "back" in loc or "peeth" in loc or "पीठ" in loc or "kamar" in loc or "कमर" in loc:
+                response = "आपकी पीठ में तकलीफ़ है। कृपया बताइए, यह समस्या कब से है?"
+            elif "abdomen" in loc or "stomach" in loc or "pet" in loc or "पेट" in loc:
+                response = "आपके पेट में तकलीफ़ है। कृपया बताइए, यह समस्या कब से है?"
+            else:
+                # Default generic opening for body part
+                response = f"आपको {state.body_map_location} में तकलीफ़ है। कृपया बताइए, यह समस्या कब से है?"
+        else:
+            response = "नमस्ते। कृपया बताइए, आपकी मुख्य समस्या क्या है?"
+
+        state.history.append(DialogueTurn(
+            speaker="system",
+            text=response,
+            language="hi"
+        ))
+        return response
 
     def step(self, asr_output: ASROutput, state: DialogueState, patient_id: Optional[str] = None) -> str:
         """
@@ -119,6 +149,21 @@ class DialogueEngine:
                 extraction_result = ExtractionResult(extractions=merged_extractions)
                 logger.debug(f"Merged extractions: {[(e.slot.name, e.confidence) for e in extraction_result.extractions]}")
 
+            # Body Map + Patient Voice Merging
+            # If body map was selected, inject it as LOCATION if not explicitly extracted
+            if state.body_map_location:
+                has_location = any(e.slot == ClinicalSlot.LOCATION for e in extraction_result.extractions)
+                if not has_location:
+                    # check if chief complaint or other core slot was extracted
+                    has_core = any(e.slot in [ClinicalSlot.CHIEF_COMPLAINT, ClinicalSlot.DURATION, ClinicalSlot.SEVERITY, ClinicalSlot.ONSET] for e in extraction_result.extractions)
+                    if has_core:
+                        extraction_result.extractions.append(ExtractedSlot(
+                            slot=ClinicalSlot.LOCATION,
+                            value=state.body_map_location,
+                            confidence=0.8,
+                            evidence="body_map"
+                        ))
+
             # 1b. Update session‑scoped clinical memory with extractions.
             if extraction_result.extractions:
                 self.memory.update_from_extractions(
@@ -151,11 +196,15 @@ class DialogueEngine:
 
         if not response_text or not response_text.strip():
             logger.warning("Empty response received from WordingLLM. Using fallback response.")
-            if action.next_slot:
-                from ayusetu.ai.conversation.ontology import SLOT_INTENTS
-                response_text = SLOT_INTENTS.get(action.next_slot, "Could you please tell me more?")
+            if action.needs_clarification and action.question_intent and not action.next_slot:
+                response_text = action.question_intent
+            elif action.next_slot:
+                from ayusetu.ai.conversation.ontology import FALLBACK_QUESTIONS
+                response_text = FALLBACK_QUESTIONS.get(action.next_slot, "कृपया थोड़ा और बताइए।")
+                if action.needs_clarification and action.question_intent:
+                    response_text = action.question_intent
             else:
-                response_text = "Could you please repeat that?"
+                response_text = "क्या आप कृपया अपनी बात दोहरा सकते हैं?"
 
         # 5. Append AI response to history
         state.history.append(DialogueTurn(

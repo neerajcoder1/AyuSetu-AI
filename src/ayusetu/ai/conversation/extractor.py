@@ -143,6 +143,7 @@ _ASSOCIATED_SYMPTOM_PATTERNS: list[tuple[re.Pattern, str, float]] = [
 def _extract_associated_symptoms(
     text: str,
     chief_complaint_value: Optional[str],
+    target_slot: Optional[ClinicalSlot] = None,
 ) -> Optional[ExtractedSlot]:
     """
     Extract associated symptoms, skipping the chief complaint to avoid duplication.
@@ -156,6 +157,16 @@ def _extract_associated_symptoms(
             found.append(symptom)
 
     if not found:
+        if target_slot == ClinicalSlot.ASSOCIATED_SYMPTOMS:
+            short_neg = re.compile(r"\b(?:no|nope|none|nothing|nahi|नहीं|na|naa|kuch\s*nahi|koi\s*nahi)\b", re.I | re.U)
+            m_short = short_neg.search(text)
+            if m_short:
+                return ExtractedSlot(
+                    slot=ClinicalSlot.ASSOCIATED_SYMPTOMS,
+                    value="none",
+                    confidence=0.85,
+                    evidence=m_short.group(0),
+                )
         return None
 
     # De-duplicate while preserving order
@@ -178,7 +189,10 @@ def _extract_associated_symptoms(
 # Helper: aggravating / relieving factors
 # ---------------------------------------------------------------------------
 
-def _extract_aggravating_relieving(text: str) -> Optional[ExtractedSlot]:
+def _extract_aggravating_relieving(
+    text: str,
+    target_slot: Optional[ClinicalSlot] = None,
+) -> Optional[ExtractedSlot]:
     patterns = [
         (re.compile(r"\b(worse\s*(?:when|after|with)?|badhta\s*hai|बढ़ता\s*है|zyada\s*hota\s*hai)\b",
                     re.I | re.U), "worsens", 0.78),
@@ -196,6 +210,16 @@ def _extract_aggravating_relieving(text: str) -> Optional[ExtractedSlot]:
         if pattern.search(text):
             found.append(label)
     if not found:
+        if target_slot == ClinicalSlot.AGGRAVATING_RELIEVING:
+            short_neg = re.compile(r"\b(?:no|nope|none|nothing|nahi|नहीं|na|naa|kuch\s*nahi|koi\s*nahi|pata\s*nahi|don't\s*know)\b", re.I | re.U)
+            m_short = short_neg.search(text)
+            if m_short:
+                return ExtractedSlot(
+                    slot=ClinicalSlot.AGGRAVATING_RELIEVING,
+                    value="none reported",
+                    confidence=0.75,
+                    evidence=m_short.group(0),
+                )
         return None
     return ExtractedSlot(
         slot=ClinicalSlot.AGGRAVATING_RELIEVING,
@@ -271,7 +295,7 @@ def _extract_past_medical_history(
 
     if target_slot == ClinicalSlot.PAST_MEDICAL_HISTORY:
         short_neg_pattern = re.compile(
-            r"(?:^|\s|\b)(?:no|nope|none|nothing|nahi|नहीं|na|naa|kuch\s*nahi|koi\s*nahi)(?:\s|$|\b)",
+            r"(?:^|\s|\b)(?:no|nope|none|nothing|nahi|नहीं|na|naa|kuch\s*nahi|koi\s*nahi|pata\s*nahi|don't\s*know)(?:\s|$|\b)",
             re.I | re.U,
         )
         m_short = short_neg_pattern.search(text)
@@ -330,7 +354,7 @@ def _extract_medications(
             )
 
     if target_slot == ClinicalSlot.MEDICATIONS:
-        short_neg = re.compile(r"\b(?:no|none|nope|nothing|nahi|नहीं|kuch\s*nahi|koi\s*nahi)\b", re.I | re.U)
+        short_neg = re.compile(r"\b(?:no|none|nope|nothing|nahi|नहीं|kuch\s*nahi|koi\s*nahi|pata\s*nahi|don't\s*know)\b", re.I | re.U)
         m_short = short_neg.search(text)
         if m_short:
             return ExtractedSlot(
@@ -376,7 +400,7 @@ def _extract_allergies(
             evidence=m_pos.group(0),
         )
     if target_slot == ClinicalSlot.ALLERGIES:
-        short_neg = re.compile(r"\b(?:no|none|nope|nothing|nahi|नहीं|kuch\s*nahi|koi\s*nahi)\b", re.I | re.U)
+        short_neg = re.compile(r"\b(?:no|none|nope|nothing|nahi|नहीं|kuch\s*nahi|koi\s*nahi|pata\s*nahi|don't\s*know)\b", re.I | re.U)
         m_short = short_neg.search(text)
         if m_short:
             return ExtractedSlot(
@@ -392,7 +416,10 @@ def _extract_allergies(
 # Helper: lifestyle
 # ---------------------------------------------------------------------------
 
-def _extract_lifestyle(text: str) -> Optional[ExtractedSlot]:
+def _extract_lifestyle(
+    text: str,
+    target_slot: Optional[ClinicalSlot] = None,
+) -> Optional[ExtractedSlot]:
     patterns = [
         (re.compile(r"\b(smok(?:ing|er|es?)|cigarette|bidi|beedi|tambaku|तंबाकू)\b",
                     re.I | re.U), "smoking", 0.90),
@@ -414,6 +441,16 @@ def _extract_lifestyle(text: str) -> Optional[ExtractedSlot]:
         if pattern.search(text):
             found.append(label)
     if not found:
+        if target_slot == ClinicalSlot.LIFESTYLE:
+            short_neg = re.compile(r"\b(?:no|nope|none|nothing|nahi|नहीं|na|naa|kuch\s*nahi|koi\s*nahi|all\s*good|sab\s*theek)\b", re.I | re.U)
+            m_short = short_neg.search(text)
+            if m_short:
+                return ExtractedSlot(
+                    slot=ClinicalSlot.LIFESTYLE,
+                    value="none reported",
+                    confidence=0.75,
+                    evidence=m_short.group(0),
+                )
         return None
     return ExtractedSlot(
         slot=ClinicalSlot.LIFESTYLE,
@@ -454,7 +491,7 @@ def _extract_family_history(
                 evidence=matched,
             )
     if target_slot == ClinicalSlot.FAMILY_HISTORY:
-        short_neg = re.compile(r"\b(?:no|none|nope|nothing|no\s*family\s*history|parivaar\s*mein\s*koi\s*bimari\s*nahi|nahi|नहीं)\b", re.I | re.U)
+        short_neg = re.compile(r"\b(?:no|none|nope|nothing|no\s*family\s*history|parivaar\s*mein\s*koi\s*bimari\s*nahi|nahi|नहीं|pata\s*nahi|don't\s*know)\b", re.I | re.U)
         m_short = short_neg.search(text)
         if m_short:
             return ExtractedSlot(
@@ -549,7 +586,7 @@ class DeterministicRuleExtractor:
             ))
 
         # 5. Severity (via utils)
-        sev = parse_severity(text)
+        sev = parse_severity(text, target_slot=target_slot)
         if sev:
             slots.append(ExtractedSlot(
                 slot=ClinicalSlot.SEVERITY,
@@ -559,12 +596,12 @@ class DeterministicRuleExtractor:
             ))
 
         # 6. Associated symptoms (avoid duplicating chief complaint)
-        assoc = _extract_associated_symptoms(text, chief_value)
+        assoc = _extract_associated_symptoms(text, chief_value, target_slot=target_slot)
         if assoc:
             slots.append(assoc)
 
         # 7. Aggravating / relieving factors
-        agg = _extract_aggravating_relieving(text)
+        agg = _extract_aggravating_relieving(text, target_slot=target_slot)
         if agg:
             slots.append(agg)
 
@@ -589,7 +626,7 @@ class DeterministicRuleExtractor:
             slots.append(fh)
 
         # 12. Lifestyle
-        ls = _extract_lifestyle(text)
+        ls = _extract_lifestyle(text, target_slot=target_slot)
         if ls:
             slots.append(ls)
 

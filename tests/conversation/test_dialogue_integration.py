@@ -72,7 +72,7 @@ def test_integration_full_dialogue_flow(engine):
     assert ClinicalSlot.ONSET not in state.collected_info
     
     # Explicit Verification: Engine knows exactly which slot is next
-    assert state.missing_slots[0] == ClinicalSlot.ONSET
+    assert state.missing_slots[0] == ClinicalSlot.LOCATION
     assert resp1 == "Dynamic Wording Variation #1"
 
     # ==========================================
@@ -83,7 +83,7 @@ def test_integration_full_dialogue_flow(engine):
     
     # Explicit Verification: Low confidence does not update clinical state
     assert state.needs_clarification is True
-    assert state.missing_slots[0] == ClinicalSlot.ONSET
+    assert state.missing_slots[0] == ClinicalSlot.LOCATION
     assert ClinicalSlot.ONSET not in state.collected_info
     assert resp2 == "Dynamic Wording Variation #2"
 
@@ -94,7 +94,7 @@ def test_integration_full_dialogue_flow(engine):
     resp3 = engine.step(asr3, state)
     
     # Extractor gets nothing -> state does not advance -> repeats question
-    assert state.missing_slots[0] == ClinicalSlot.ONSET
+    assert state.missing_slots[0] == ClinicalSlot.LOCATION
     assert resp3 == "Dynamic Wording Variation #3"
 
     # ==========================================
@@ -107,8 +107,8 @@ def test_integration_full_dialogue_flow(engine):
     # Explicit Verification: Duplicate info doesn't break state, Onset is added
     assert ClinicalSlot.ONSET in state.collected_info
     
-    # Explicit Verification: Engine moves to Location
-    assert state.missing_slots[0] == ClinicalSlot.LOCATION
+    # Explicit Verification: Engine moves to Severity since Location was skipped due to attempts
+    assert state.missing_slots[0] == ClinicalSlot.SEVERITY
     # Verifies the Wording LLM was targeted with 'hinglish'
     assert state.history[-1].language == "hinglish"
     assert resp4 == "Dynamic Wording Variation #4"

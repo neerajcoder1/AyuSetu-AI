@@ -11,7 +11,7 @@ class DialoguePlanner:
     def __init__(self, asr_confidence_threshold: float = 0.6, extraction_confidence_threshold: float = 0.7):
         self.asr_confidence_threshold = asr_confidence_threshold
         self.extraction_confidence_threshold = extraction_confidence_threshold
-        
+
     def initialize_state(self) -> DialogueState:
         return DialogueState(
             collected_info={},
@@ -27,9 +27,9 @@ class DialoguePlanner:
         """
         # 1. Update history with patient's turn
         current_state.history.append(DialogueTurn(
-            speaker="patient", 
-            text=asr_output.text, 
-            language=asr_output.language, 
+            speaker="patient",
+            text=asr_output.text,
+            language=asr_output.language,
             confidence=asr_output.confidence
         ))
 
@@ -65,6 +65,7 @@ class DialoguePlanner:
                     current_state.collected_info[ext.slot] = ext.value
                     if ext.slot in current_state.missing_slots:
                         current_state.missing_slots.remove(ext.slot)
+
         # ==== Clarification handling for chief complaint ====
         # Determine if chief complaint is still missing
         chief_missing = ClinicalSlot.CHIEF_COMPLAINT in current_state.missing_slots
@@ -78,6 +79,15 @@ class DialoguePlanner:
             ext.slot != ClinicalSlot.CHIEF_COMPLAINT and ext.confidence >= self.extraction_confidence_threshold
             for ext in extraction_result.extractions
         )
+
+        # If we are already in clarification mode and still no chief extraction, we must break the loop.
+        if current_state.chief_complaint_attempted and chief_missing and not chief_extracted:
+            current_state.collected_info[ClinicalSlot.CHIEF_COMPLAINT] = "unclear / not explicitly stated"
+            current_state.missing_slots.remove(ClinicalSlot.CHIEF_COMPLAINT)
+            current_state.chief_complaint_attempted = False
+            chief_missing = False
+            chief_extracted = True
+
         # Activate clarification mode if chief missing, no confident chief, but other info present
         if chief_missing and not chief_extracted and other_confident:
             current_state.chief_complaint_attempted = True
@@ -88,25 +98,34 @@ class DialoguePlanner:
                 is_complete=False,
                 needs_clarification=True,
             )
-        # If we are already in clarification mode and still no chief extraction, keep asking clarification
-        if current_state.chief_complaint_attempted and chief_missing and not chief_extracted:
-            clarification_intent = "आपको किस तरह की तकलीफ़ या समस्या हो रही है? कृपया थोड़ा और बताइए।"
-            return PlannerAction(
-                next_slot=ClinicalSlot.CHIEF_COMPLAINT,
-                question_intent=clarification_intent,
-                is_complete=False,
-                needs_clarification=True,
-            )
+
         # If a confident chief complaint was finally extracted, clear the flag
         if chief_extracted:
             current_state.chief_complaint_attempted = False
 
         # ==== Deterministic queue ====
+        if current_state.missing_slots:
+            next_slot = current_state.missing_slots[0]
+            # Check attempts
+            attempts = current_state.slot_attempts.get(next_slot, 0)
+            if attempts >= 2:
+                # Give up and mark UNKNOWN for non-core slots or even core slots
+                # if we have at least chief complaint, we can skip others.
+                # To be safe, let's just skip it and record as UNKNOWN
+                current_state.collected_info[next_slot] = "UNKNOWN/NOT PROVIDED"
+                current_state.missing_slots.remove(next_slot)
+                # re-evaluate if we have missing slots
+                if not current_state.missing_slots:
+                    current_state.is_complete = True
+                    return PlannerAction(is_complete=True)
+                next_slot = current_state.missing_slots[0]
+
+            current_state.slot_attempts[next_slot] = current_state.slot_attempts.get(next_slot, 0) + 1
+
         if not current_state.missing_slots:
             current_state.is_complete = True
             return PlannerAction(is_complete=True)
 
-        next_slot = current_state.missing_slots[0]
         intent = SLOT_INTENTS.get(next_slot, "Ask for this information.")
 
         return PlannerAction(
