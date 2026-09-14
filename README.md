@@ -1,4 +1,6 @@
-# AyuSetu AI
+# AyuSetu AI 
+<img width="1536" height="1024" alt="AyuSetu AI Consultation in a Modern Clinic" src="https://github.com/user-attachments/assets/bece7a63-c5df-470c-9a4b-86de5ccbee13" />
+
 
 AI‑powered multimodal patient case‑taking system for AyuSetu/Ayurveda clinical workflows.
 
