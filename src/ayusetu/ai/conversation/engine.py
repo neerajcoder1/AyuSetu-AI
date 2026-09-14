@@ -8,6 +8,9 @@ from ayusetu.ai.conversation.wording import WordingLLM
 from ayusetu.ai.conversation.llm_provider import OpenAICompatibleProvider
 from ayusetu.ai.clinical.memory import ClinicalMemory
 from ayusetu.ai.clinical.hindsight import HindsightMemoryManager
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class DialogueEngine:
@@ -37,15 +40,16 @@ class DialogueEngine:
     """
 
     def __init__(self,
-                 extractor: Optional[ClinicalExtractor] = None,
-                 llm_provider=None,
-                 asr_confidence_threshold: float = 0.6,
-                 extraction_confidence_threshold: float = 0.7,
-                 memory: Optional[ClinicalMemory] = None,
-                 hindsight_manager: Optional[HindsightMemoryManager] = None):
-
+                extractor: Optional[ClinicalExtractor] = None,
+                llm_provider=None,
+                asr_confidence_threshold: float = 0.6,
+                extraction_confidence_threshold: float = 0.7,
+                memory: Optional[ClinicalMemory] = None,
+                hindsight_manager: Optional[HindsightMemoryManager] = None):
+        # Primary extractor (could be LLM‑based). Default to deterministic rule extractor.
         self.extractor = extractor or DeterministicRuleExtractor()
-
+        # Deterministic fallback extractor – always rule‑based.
+        self.fallback_extractor = DeterministicRuleExtractor()
         provider = llm_provider or OpenAICompatibleProvider()
         self.wording_llm = WordingLLM(provider)
 
@@ -70,20 +74,52 @@ class DialogueEngine:
         """
         # 1. Extract info (only if ASR confidence is sufficient)
         extraction_result = ExtractionResult(extractions=[])
+        logger.debug(f"ASR Output: text='{asr_output.text}', confidence={asr_output.confidence}, passed_threshold={asr_output.confidence >= self.planner.asr_confidence_threshold}")
         if asr_output.confidence >= self.planner.asr_confidence_threshold:
             current_target_slot = state.missing_slots[0] if state and state.missing_slots else None
+            # Primary extraction attempt
             try:
-                extraction_result = self.extractor.extract(asr_output.text, target_slot=current_target_slot)
+                primary_result = self.extractor.extract(asr_output.text, target_slot=current_target_slot)
             except TypeError:
-                extraction_result = self.extractor.extract(asr_output.text)
+                primary_result = self.extractor.extract(asr_output.text)
+            except Exception:
+                primary_result = ExtractionResult(extractions=[])
 
-            # 1b. Update session-scoped clinical memory with extractions.
-            #     Only slots that meet the extraction confidence threshold
-            #     are meaningful, but we store all of them in memory
-            #     (including low-confidence ones) so downstream components
-            #     can make their own decisions.  The memory's own update
-            #     logic ensures lower-confidence values never overwrite
-            #     higher-confidence ones.
+            logger.debug(f"Target slot: {current_target_slot}, Primary extractions: {[(e.slot.name, e.confidence) for e in primary_result.extractions]}")
+
+            # Determine if primary extraction for the target slot is high confidence
+            high_confidence = False
+            if current_target_slot:
+                for ext in primary_result.extractions:
+                    if ext.slot == current_target_slot and ext.confidence >= self.planner.extraction_confidence_threshold:
+                        high_confidence = True
+                        break
+
+            logger.debug(f"Primary high confidence for target: {high_confidence}")
+
+            if high_confidence:
+                extraction_result = primary_result
+            else:
+                # Fallback deterministic extraction
+                try:
+                    fallback_result = self.fallback_extractor.extract(asr_output.text, target_slot=current_target_slot)
+                except TypeError:
+                    fallback_result = self.fallback_extractor.extract(asr_output.text)
+                except Exception:
+                    fallback_result = ExtractionResult(extractions=[])
+
+                logger.info(f"Fallback extractions: {[(e.slot.name, e.confidence) for e in fallback_result.extractions]}")
+
+                # Merge according to rules: keep primary slots except low‑conf target, add fallback slots
+                merged_extractions = []
+                for ext in primary_result.extractions:
+                    if not (current_target_slot and ext.slot == current_target_slot):
+                        merged_extractions.append(ext)
+                merged_extractions.extend(fallback_result.extractions)
+                extraction_result = ExtractionResult(extractions=merged_extractions)
+                logger.debug(f"Merged extractions: {[(e.slot.name, e.confidence) for e in extraction_result.extractions]}")
+
+            # 1b. Update session‑scoped clinical memory with extractions.
             if extraction_result.extractions:
                 self.memory.update_from_extractions(
                     extracted_slots=extraction_result.extractions,
@@ -92,6 +128,7 @@ class DialogueEngine:
 
         # 2. State Machine Planner determines intent
         action = self.planner.plan_next_action(asr_output, state, extraction_result)
+        logger.debug(f"Planner Action: next_slot={action.next_slot.name if action.next_slot else None}, is_complete={action.is_complete}, needs_clarification={action.needs_clarification}")
 
         # 3. Optional Hindsight memory retrieval (background context for wording)
         historical_context = None
@@ -111,6 +148,14 @@ class DialogueEngine:
             language=target_lang,
             historical_context=historical_context
         )
+
+        if not response_text or not response_text.strip():
+            logger.warning("Empty response received from WordingLLM. Using fallback response.")
+            if action.next_slot:
+                from ayusetu.ai.conversation.ontology import SLOT_INTENTS
+                response_text = SLOT_INTENTS.get(action.next_slot, "Could you please tell me more?")
+            else:
+                response_text = "Could you please repeat that?"
 
         # 5. Append AI response to history
         state.history.append(DialogueTurn(
