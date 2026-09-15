@@ -51,6 +51,11 @@ class ConversationSession:
     summary: Optional[ClinicalSummary] = None
     encounter_id: Optional[str] = None
     patient_id: Optional[str] = None
+    status: str = "IN_PROGRESS"
+    submitted_at: Optional[str] = None
+    case_id: Optional[str] = None
+    reviewed_at: Optional[str] = None
+    reviewed_by: Optional[str] = None
 
     def __post_init__(self):
         if not self.encounter_id:
@@ -247,15 +252,26 @@ class VoicePipeline:
                 asr_output.confidence,
                 target_lang,
             )
-            tts_result = self._tts_provider.synthesize(text=reprompt_text, language=target_lang)
-            result.update(
-                {
-                    "response_text": reprompt_text,
-                    "response_audio": tts_result.audio,
-                    "response_sample_rate": tts_result.sample_rate,
-                    "response_duration": tts_result.duration,
-                }
-            )
+            try:
+                tts_result = self._tts_provider.synthesize(text=reprompt_text, language=target_lang)
+                result.update(
+                    {
+                        "response_text": reprompt_text,
+                        "response_audio": tts_result.audio,
+                        "response_sample_rate": tts_result.sample_rate,
+                        "response_duration": tts_result.duration,
+                    }
+                )
+            except NotImplementedError:
+                logger.warning("TTS synthesis is unavailable; skipping audio generation.")
+                result.update(
+                    {
+                        "response_text": reprompt_text,
+                        "response_audio": None,
+                        "response_sample_rate": None,
+                        "response_duration": None,
+                    }
+                )
             return result
 
         # If we do not already have a state (i.e., no session supplied), create a temporary one
@@ -287,14 +303,22 @@ class VoicePipeline:
         target_lang = getattr(state, "preferred_language", None) or asr_output.language
         if not target_lang or target_lang == "unknown":
             target_lang = "hinglish"
-        tts_result = self._tts_provider.synthesize(text=response_text, language=target_lang)
-        result.update(
-            {
-                "response_audio": tts_result.audio,
-                "response_sample_rate": tts_result.sample_rate,
-                "response_duration": tts_result.duration,
-            }
-        )
+        try:
+            tts_result = self._tts_provider.synthesize(text=response_text, language=target_lang)
+            result.update(
+                {
+                    "response_audio": tts_result.audio,
+                    "response_sample_rate": tts_result.sample_rate,
+                    "response_duration": tts_result.duration,
+                }
+            )
+        except NotImplementedError:
+            logger.warning("TTS synthesis is unavailable; skipping audio generation.")
+            result.update({
+                "response_audio": None,
+                "response_sample_rate": None,
+                "response_duration": None,
+            })
         return result
 
 # End of file

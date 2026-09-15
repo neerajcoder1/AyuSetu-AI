@@ -8,6 +8,7 @@ import {
   AlertTriangle,
   Sparkles,
   ShieldCheck,
+  ClipboardList,
 } from 'lucide-react';
 
 export default function Sidebar({
@@ -17,8 +18,16 @@ export default function Sidebar({
   redFlagsCount = 0,
   documentsCount = 0,
   slotsElicitedCount = 0,
+  submittedCasesCount = 0,
 }) {
   const navItems = [
+    {
+      id: 'cases',
+      label: 'Patient Cases',
+      icon: ClipboardList,
+      badge: submittedCasesCount > 0 ? `${submittedCasesCount}` : null,
+      badgeColor: 'bg-blue-100 text-blue-800',
+    },
     {
       id: 'overview',
       label: 'Dashboard',

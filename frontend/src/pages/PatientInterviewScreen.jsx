@@ -60,6 +60,7 @@ export default function PatientInterviewScreen({
   const [isDocModalOpen, setIsDocModalOpen] = useState(false);
   const [bodyMapSummary, setBodyMapSummary] = useState('');
   const [error, setError] = useState(null);
+  const [submissionData, setSubmissionData] = useState(null);
 
   const currentAudioRef = useRef(null);
   const currentAudioUrlRef = useRef(null);
@@ -256,14 +257,16 @@ export default function PatientInterviewScreen({
           <ReviewStep
             dialogueState={dialogueState}
             sessionDocuments={sessionDocuments}
+            sessionId={sessionId}
             goToPreviousStep={goToPreviousStep}
-            onGoToDoctorDashboard={onGoToDoctorDashboard}
+            goToNextStep={goToNextStep}
+            onSubmissionComplete={(data) => setSubmissionData(data)}
             setCurrentStep={setCurrentStep}
             PatientFlowStep={PatientFlowStep}
           />
         );
       case PatientFlowStep.SUBMITTED:
-        return <SubmittedStep />;
+        return <SubmittedStep submissionData={submissionData} />;
       default:
         return null;
     }

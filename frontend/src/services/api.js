@@ -142,4 +142,44 @@ export const api = {
     });
     return handleResponse(res);
   },
+
+  // Submit case to physician for review
+  async submitToPhysician(sessionId) {
+    const res = await fetch(`${API_BASE_URL}/sessions/${sessionId}/submit`, {
+      method: 'POST',
+    });
+    return handleResponse(res);
+  },
+
+  // Get session submission status
+  async getSessionStatus(sessionId) {
+    const res = await fetch(`${API_BASE_URL}/sessions/${sessionId}/status`, {
+      method: 'GET',
+    });
+    return handleResponse(res);
+  },
+
+  // ── Physician Case Queue ──────────────────────────────────────────────────
+
+  // List all submitted cases (for physician dashboard)
+  async getSubmittedCases() {
+    const res = await fetch(`${API_BASE_URL}/cases`, { method: 'GET' });
+    return handleResponse(res);
+  },
+
+  // Get full case detail by case_id
+  async getCaseDetail(caseId) {
+    const res = await fetch(`${API_BASE_URL}/cases/${caseId}`, { method: 'GET' });
+    return handleResponse(res);
+  },
+
+  // Physician starts reviewing a case (status → UNDER_REVIEW)
+  async startCaseReview(caseId, physicianId = 'DR-9942') {
+    const res = await fetch(`${API_BASE_URL}/cases/${caseId}/start-review`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ physician_id: physicianId }),
+    });
+    return handleResponse(res);
+  },
 };

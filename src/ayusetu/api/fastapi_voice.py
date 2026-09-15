@@ -20,6 +20,7 @@ from ayusetu.ai.clinical.summary.contracts import ClinicalSummary, RejectionReas
 from ayusetu.ai.clinical.summary import physician_review
 from ayusetu.ai.clinical.memory.contracts import EncounterSnapshot, TimelineEvent
 from ayusetu.ai.clinical.memory.timeline import build_timeline_from_encounter
+from ayusetu.ai.clinical import case_store
 
 app = FastAPI(title="AyuSetu Voice API")
 
@@ -190,7 +191,14 @@ def turn(
         wav_path.unlink(missing_ok=True)
         raise HTTPException(status_code=404, detail="Session not found")
     except Exception as e:
+        # Check if it's an audio validation error
+        if e.__class__.__name__ in ("AudioValidationError", "AudioLoadError"):
+            wav_path.unlink(missing_ok=True)
+            raise HTTPException(status_code=400, detail=str(e))
+        
         wav_path.unlink(missing_ok=True)
+        import logging
+        logging.getLogger("ayusetu.api.fastapi_voice").exception("Pipeline processing error")
         raise HTTPException(status_code=500, detail="Pipeline processing error")
     finally:
         wav_path.unlink(missing_ok=True)
@@ -270,6 +278,124 @@ def upload_document(session_id: str, document: UploadFile = File(...)):
         "entities": [e.model_dump(mode="json") for e in entities],
     }
 
+# ------------------- Patient Submission Endpoints -------------------
+class SubmitResponse(BaseModel):
+    case_id: str
+    session_id: str
+    status: str
+    submitted_at: str
+    collected_slots_count: int
+
+class SessionStatusResponse(BaseModel):
+    session_id: str
+    status: str
+    submitted_at: Optional[str] = None
+    case_id: Optional[str] = None
+
+@app.post("/sessions/{session_id}/submit", response_model=SubmitResponse)
+def submit_to_physician(session_id: str):
+    """Patient submits their case for physician review."""
+    try:
+        session = voice_pipeline.get_session(session_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    if session.status in ("SUBMITTED", "UNDER_REVIEW", "REVIEWED"):
+        raise HTTPException(status_code=400, detail="Case has already been submitted")
+
+    # Generate the clinical summary if not yet generated
+    if session.summary is None:
+        try:
+            collected_info = {
+                s.value if hasattr(s, "value") else str(s): str(v)
+                for s, v in session.state.collected_info.items()
+            }
+            missing_slots = [
+                s.value if hasattr(s, "value") else str(s)
+                for s in session.state.missing_slots
+            ]
+            summary = SummaryGenerator().generate(
+                encounter_id=session_id,
+                collected_info=collected_info,
+                missing_slots=missing_slots,
+                red_flag_events=session.red_flag_events,
+                document_entities=session.document_entities,
+            )
+            session.summary = summary
+        except Exception as exc:
+            import logging
+            logging.getLogger("ayusetu.api").warning("Summary generation during submit skipped: %s", exc)
+
+    # Generate case ID and mark as submitted
+    import datetime
+    short_id = session_id[:8].upper()
+    session.case_id = f"CASE-{short_id}"
+    session.status = "SUBMITTED"
+    session.submitted_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+    collected_slots_count = len(session.state.collected_info) if session.state.collected_info else 0
+
+    # Serialize collected_info with string keys
+    collected_info_serialized = {
+        (s.value if hasattr(s, "value") else str(s)): str(v)
+        for s, v in session.state.collected_info.items()
+    }
+    red_flags_serialized = [
+        rf.model_dump(mode="json") if hasattr(rf, "model_dump") else vars(rf)
+        for rf in session.red_flag_events
+    ]
+    documents_serialized = [
+        entity.model_dump(mode="json") if hasattr(entity, "model_dump") else vars(entity)
+        for entity in session.document_entities
+    ]
+    summary_serialized = session.summary.model_dump(mode="json") if session.summary else None
+    transcript_serialized = [
+        turn.model_dump(mode="json") if hasattr(turn, "model_dump") else {"speaker": turn.speaker, "text": turn.text}
+        for turn in (session.state.history or [])
+    ]
+
+    # Persist to SQLite so the case survives backend restart
+    try:
+        case_store.save_case(
+            case_id=session.case_id,
+            session_id=session_id,
+            status=session.status,
+            submitted_at=session.submitted_at,
+            collected_info=collected_info_serialized,
+            red_flags=red_flags_serialized,
+            documents=documents_serialized,
+            summary=summary_serialized,
+            transcript=transcript_serialized,
+        )
+    except Exception as exc:
+        import logging
+        logging.getLogger("ayusetu.api").error("Failed to persist case to SQLite: %s", exc)
+        # Do not fail the request — case is in memory, persistence failure is non-fatal
+
+    return SubmitResponse(
+        case_id=session.case_id,
+        session_id=session_id,
+        status=session.status,
+        submitted_at=session.submitted_at,
+        collected_slots_count=collected_slots_count,
+    )
+
+
+@app.get("/sessions/{session_id}/status", response_model=SessionStatusResponse)
+def get_session_status(session_id: str):
+    """Get the submission status of a session."""
+    try:
+        session = voice_pipeline.get_session(session_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    return SessionStatusResponse(
+        session_id=session_id,
+        status=session.status,
+        submitted_at=session.submitted_at,
+        case_id=session.case_id,
+    )
+
 # ------------------- Clinical Summary Endpoints -------------------
 @app.post("/sessions/{session_id}/summary", response_model=ClinicalSummary)
 def generate_summary(session_id: str):
@@ -342,6 +468,26 @@ def sign_off_summary_endpoint(session_id: str, req: SignOffRequest):
             "Optional Hindsight summary persistence skipped on error: %s", exc
         )
 
+    # Sync ConversationSession.status → REVIEWED (mirrors ClinicalSummary.status = FINAL)
+    import datetime
+    session.status = "REVIEWED"
+    session.reviewed_at = updated.signed_at.isoformat() if updated.signed_at else datetime.datetime.now(datetime.timezone.utc).isoformat()
+    session.reviewed_by = req.physician_id
+
+    # Update the persisted SQLite record if this session was submitted
+    if session.case_id:
+        try:
+            case_store.update_case_status(
+                case_id=session.case_id,
+                status="REVIEWED",
+                reviewed_at=session.reviewed_at,
+                reviewed_by=session.reviewed_by,
+                summary=updated.model_dump(mode="json"),
+            )
+        except Exception as exc:
+            import logging
+            logging.getLogger("ayusetu.api").warning("SQLite update after sign-off failed: %s", exc)
+
     return updated
 
 
@@ -413,3 +559,109 @@ def get_timeline(session_id: str) -> List[TimelineEvent]:
     events = build_timeline_from_encounter(snapshot)
     return events
 
+
+# ------------------- Physician Case Queue Endpoints -------------------
+
+class CaseSummaryItem(BaseModel):
+    """Lightweight case card shown in the physician case queue."""
+    case_id: str
+    session_id: str
+    status: str
+    submitted_at: Optional[str] = None
+    reviewed_at: Optional[str] = None
+    reviewed_by: Optional[str] = None
+    chief_complaint: Optional[str] = None
+    severity: Optional[str] = None
+    collected_slots_count: int = 0
+
+class StartReviewRequest(BaseModel):
+    physician_id: Optional[str] = "DR-9942"
+
+
+@app.get("/cases", response_model=List[CaseSummaryItem])
+def list_submitted_cases():
+    """Return all submitted cases for the physician dashboard.
+    Sources from SQLite (persists across restarts) and falls back/merges with in-memory sessions."""
+    rows = case_store.list_cases()
+    result = []
+    for row in rows:
+        collected_info = row.get("collected_info") or {}
+        chief_complaint = collected_info.get("chief_complaint")
+        severity = collected_info.get("severity")
+        result.append(CaseSummaryItem(
+            case_id=row["case_id"],
+            session_id=row["session_id"],
+            status=row["status"],
+            submitted_at=row.get("submitted_at"),
+            reviewed_at=row.get("reviewed_at"),
+            reviewed_by=row.get("reviewed_by"),
+            chief_complaint=chief_complaint,
+            severity=severity,
+            collected_slots_count=len(collected_info) if collected_info else 0,
+        ))
+    return result
+
+
+@app.get("/cases/{case_id}")
+def get_case_detail(case_id: str):
+    """Return the full case detail for physician review.
+    Merges the persisted SQLite record with the live in-memory session (if still loaded)."""
+    row = case_store.get_case(case_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    # Try to augment from live in-memory session
+    session_id = row["session_id"]
+    try:
+        session = voice_pipeline.get_session(session_id)
+        # Use live data (more current) if session is still in memory
+        row["status"] = session.status
+        row["reviewed_at"] = session.reviewed_at
+        row["reviewed_by"] = session.reviewed_by
+        if session.summary:
+            row["summary"] = session.summary.model_dump(mode="json")
+        collected_info = {
+            (s.value if hasattr(s, "value") else str(s)): str(v)
+            for s, v in session.state.collected_info.items()
+        }
+        if collected_info:
+            row["collected_info"] = collected_info
+        red_flags = [
+            rf.model_dump(mode="json") if hasattr(rf, "model_dump") else vars(rf)
+            for rf in session.red_flag_events
+        ]
+        if red_flags:
+            row["red_flags"] = red_flags
+        transcript = [
+            turn.model_dump(mode="json") if hasattr(turn, "model_dump") else {"speaker": turn.speaker, "text": turn.text}
+            for turn in (session.state.history or [])
+        ]
+        if transcript:
+            row["transcript"] = transcript
+    except KeyError:
+        # Session not in memory — serve from SQLite only (after backend restart)
+        pass
+
+    return row
+
+
+@app.post("/cases/{case_id}/start-review")
+def start_case_review(case_id: str, req: StartReviewRequest = None):
+    """Physician begins reviewing a case. Sets status to UNDER_REVIEW."""
+    row = case_store.get_case(case_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+    if row["status"] == "REVIEWED":
+        raise HTTPException(status_code=400, detail="Case has already been reviewed")
+
+    case_store.update_case_status(case_id=case_id, status="UNDER_REVIEW")
+
+    # Mirror on in-memory session if still loaded
+    session_id = row["session_id"]
+    try:
+        session = voice_pipeline.get_session(session_id)
+        session.status = "UNDER_REVIEW"
+    except KeyError:
+        pass
+
+    return {"case_id": case_id, "status": "UNDER_REVIEW"}

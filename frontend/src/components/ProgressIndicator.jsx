@@ -16,28 +16,46 @@ const steps = [
 ];
 
 export default function ProgressIndicator({ currentStep }) {
+  const currentIdx = steps.findIndex((s) => s.key === currentStep);
+
   return (
     <div className="w-full overflow-x-auto mb-4">
-      <ul className="flex flex-wrap justify-between items-center text-sm font-medium">
+      <ul className="flex items-center justify-between text-sm font-medium">
         {steps.map((step, idx) => {
-          const currentIdx = steps.findIndex((s) => s.key === currentStep);
           const isCompleted = currentIdx > idx;
           const isCurrent = step.key === currentStep;
           return (
-            <li
-              key={step.key}
-              className={`flex items-center ${isCompleted ? 'text-emerald-700' : isCurrent ? 'text-sky-600' : 'text-gray-400'} ${idx !== steps.length - 1 ? 'mr-2' : ''}`}
-            >
-              {isCompleted ? (
-                <CheckCircle2 className="w-4 h-4 mr-1" />
-              ) : (
-                <span className="w-4 h-4 mr-1 border rounded-full" />
-              )}
-              <span>{step.label}</span>
+            <React.Fragment key={step.key}>
+              <li className="flex items-center">
+                {isCompleted ? (
+                  <span className="w-6 h-6 rounded-full bg-emerald-600 flex items-center justify-center">
+                    <CheckCircle2 className="w-4 h-4 text-white" />
+                  </span>
+                ) : isCurrent ? (
+                  <span className="w-6 h-6 rounded-full bg-sky-600 flex items-center justify-center">
+                    <span className="w-2 h-2 rounded-full bg-white" />
+                  </span>
+                ) : (
+                  <span className="w-6 h-6 rounded-full border-2 border-gray-300" />
+                )}
+                <span
+                  className={`ml-2 hidden sm:inline ${
+                    isCompleted ? 'text-emerald-700' : isCurrent ? 'text-sky-600 font-semibold' : 'text-gray-400'
+                  }`}
+                >
+                  {step.label}
+                </span>
+              </li>
               {idx < steps.length - 1 && (
-                <span className="mx-2 w-4 h-px bg-gray-300 flex-1 hidden sm:inline-block" />
+                <li className="flex-1 mx-2">
+                  <div
+                    className={`h-0.5 w-full ${
+                      currentIdx > idx ? 'bg-emerald-500' : 'bg-gray-200'
+                    }`}
+                  />
+                </li>
               )}
-            </li>
+            </React.Fragment>
           );
         })}
       </ul>

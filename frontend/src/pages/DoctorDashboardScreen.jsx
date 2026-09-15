@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Stethoscope,
   FileText,
@@ -14,11 +14,14 @@ import {
   Clock,
   Globe,
   AlertTriangle,
+  InboxIcon,
+  ClipboardList,
 } from 'lucide-react';
 import RedFlagAlertPanel from '../components/RedFlagAlertPanel';
 import ClinicalTimelineWidget from '../components/ClinicalTimelineWidget';
 import DocumentUploadModal from '../components/DocumentUploadModal';
 import SummaryReviewModal from '../components/SummaryReviewModal';
+import CaseReviewPanel from '../components/CaseReviewPanel';
 import { api } from '../services/api';
 
 export default function DoctorDashboardScreen({
@@ -37,6 +40,28 @@ export default function DoctorDashboardScreen({
   const [timelineRefreshKey, setTimelineRefreshKey] = useState(0);
   const [localDocumentEntities, setLocalDocumentEntities] = useState([]);
   const [error, setError] = useState(null);
+
+  // Submitted cases queue state
+  const [submittedCases, setSubmittedCases] = useState([]);
+  const [casesLoading, setCasesLoading] = useState(false);
+  const [activeCaseId, setActiveCaseId] = useState(null); // null = show queue, string = show case detail
+
+  // Load submitted cases from backend
+  const fetchCases = useCallback(async () => {
+    setCasesLoading(true);
+    try {
+      const cases = await api.getSubmittedCases();
+      setSubmittedCases(cases || []);
+    } catch (err) {
+      console.error('Failed to load submitted cases:', err);
+    } finally {
+      setCasesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchCases();
+  }, [fetchCases]);
 
   // Generate Summary
   const handleGenerateSummary = async () => {
@@ -83,6 +108,91 @@ export default function DoctorDashboardScreen({
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+
+      {/* ── If a case is open, render CaseReviewPanel instead of cockpit ── */}
+      {activeCaseId ? (
+        <CaseReviewPanel
+          caseId={activeCaseId}
+          onClose={() => setActiveCaseId(null)}
+          onCaseUpdated={() => { fetchCases(); setActiveCaseId(null); }}
+        />
+      ) : (
+        <>
+          {/* ── Section 0: Submitted Patient Cases Queue ── */}
+          <section id="section-cases" className="scroll-mt-20">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <ClipboardList className="w-5 h-5 text-sky-600" />
+                <h2 className="text-lg font-semibold text-gray-900">Submitted Patient Cases</h2>
+                {submittedCases.length > 0 && (
+                  <span className="bg-sky-100 text-sky-800 text-xs font-medium px-2 py-0.5 rounded-full">
+                    {submittedCases.length}
+                  </span>
+                )}
+              </div>
+              <button
+                onClick={fetchCases}
+                disabled={casesLoading}
+                className="text-sm text-sky-600 hover:text-sky-800 flex items-center gap-1.5"
+              >
+                <RefreshCw className={`w-4 h-4 ${casesLoading ? 'animate-spin' : ''}`} />
+                Refresh
+              </button>
+            </div>
+
+            {casesLoading ? (
+              <div className="border border-gray-200 rounded-lg p-6 text-center text-gray-500 text-sm">
+                Loading cases…
+              </div>
+            ) : submittedCases.length === 0 ? (
+              <div className="border border-dashed border-gray-300 rounded-lg p-6 text-center text-gray-400 text-sm">
+                No submitted cases yet. Cases will appear here after patients submit their clinical history.
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {submittedCases.map((c) => {
+                  const statusConfig = {
+                    SUBMITTED: { label: 'New', className: 'bg-blue-100 text-blue-800 border-blue-300' },
+                    UNDER_REVIEW: { label: 'Under Review', className: 'bg-amber-100 text-amber-800 border-amber-300' },
+                    REVIEWED: { label: 'Reviewed', className: 'bg-emerald-100 text-emerald-800 border-emerald-300' },
+                  }[c.status] || { label: c.status, className: 'bg-gray-100 text-gray-700 border-gray-300' };
+                  const submittedAt = c.submitted_at ? new Date(c.submitted_at).toLocaleString() : '—';
+                  return (
+                    <div
+                      key={c.case_id}
+                      className="border border-gray-200 rounded-lg bg-white px-4 py-4 flex items-center justify-between gap-4 hover:border-sky-300 hover:shadow-sm transition-all"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-3 flex-wrap">
+                          <span className="font-mono font-bold text-gray-900 text-sm">{c.case_id}</span>
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${statusConfig.className}`}>
+                            {statusConfig.label}
+                          </span>
+                        </div>
+                        <p className="text-sm text-gray-700 mt-1 truncate">
+                          {c.chief_complaint ? (
+                            <><span className="font-medium">Chief complaint:</span> {c.chief_complaint}</>
+                          ) : (
+                            <span className="italic text-gray-400">Chief complaint not captured</span>
+                          )}
+                          {c.severity && <span className="ml-3 text-gray-500">· Severity: {c.severity}</span>}
+                        </p>
+                        <p className="text-xs text-gray-400 mt-0.5">Submitted: {submittedAt}</p>
+                      </div>
+                      <button
+                        onClick={() => setActiveCaseId(c.case_id)}
+                        className="flex-shrink-0 px-3 py-2 bg-sky-600 hover:bg-sky-700 text-white text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5"
+                      >
+                        <ClipboardList className="w-4 h-4" />
+                        Review Case
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+
       {/* Section 1: Cockpit Header & Real Metric Bar */}
       <section id="section-overview" className="space-y-6 scroll-mt-20">
         {/* SaaS Header Hero Banner */}
@@ -371,6 +481,8 @@ export default function DoctorDashboardScreen({
         onClose={() => setIsReviewModalOpen(false)}
         onSummaryUpdated={handleSummaryUpdated}
       />
+        </>
+      )}
     </div>
   );
 }
