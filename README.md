@@ -2,7 +2,10 @@
 <img width="1536" height="1024" alt="AyuSetu AI Consultation in a Modern Clinic" src="https://github.com/user-attachments/assets/bece7a63-c5df-470c-9a4b-86de5ccbee13" />
 
 
-AI‑powered multimodal patient case‑taking system for AyuSetu/Ayurveda clinical workflows.
+# clinical workflows.
+
+<img width="1536" height="1024" alt="ChatGPT Image Sep 16, 2026, 10_35_19 AM" src="https://github.com/user-attachments/assets/0eadcc96-78fd-4cd2-a428-f372ef4cb32c" />
+
 
 ## Problem / Purpose
 AyuSetu AI enables voice‑first patient interviews in Hindi, English, and Hinglish, automatically capturing structured clinical information, processing uploaded documents, detecting red‑flags, generating clinical summaries, and supporting physician review and sign‑off. The system also provides patient memory via Hindsight long‑term memory and ensures privacy through de‑identification, consent, and audit trails.
