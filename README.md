@@ -8,8 +8,13 @@
 
 
 ## Problem / Purpose
-AyuSetu AI enables voice‑first patient interviews in Hindi, English, and Hinglish, automatically capturing structured clinical information, processing uploaded documents, detecting red‑flags, generating clinical summaries, and supporting physician review and sign‑off. The system also provides patient memory via Hindsight long‑term memory and ensures privacy through de‑identification, consent, and audit trails.
+AyuSetu AI | Voice-First Clinical AI Assistant
 
+Voice-First Triage: Engineered a multilingual voice AI (Hindi, English, Hinglish) for patient intake, automatically capturing structured clinical data and flagging high-risk symptoms in real time.
+
+Document AI & Clinical Summaries: Built automated document ingestion to extract medical records and generate doctor-ready clinical summaries to accelerate physician review and sign-off.
+
+Long-Term Memory & Security: Integrated Hindsight long-term memory for patient context while enforcing privacy through data de-identification, explicit consent management, and audit trails.
 ## Current Implemented Features
 - **Voice‑first patient consultation** (audio turn‑taking)
 - **Multilingual support**: Hindi, English, Hinglish
